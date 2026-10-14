@@ -1,0 +1,89 @@
+name: Issue Triage & Welcome Bot
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  triage:
+    name: 🤖 Triage & Guide
+    runs-on: ubuntu-latest
+    steps:
+      - name: Process New Issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issueNumber = issue.number;
+            const title = issue.title.toLowerCase();
+            const body = issue.body || "";
+
+            let labelsToAdd = ["needs-triage"];
+            let welcomeMessage = "";
+
+            const isBug = title.startsWith("[bug]") || issue.labels.some(l => l.name === "bug");
+            const isFeature = title.startsWith("[feat]") || issue.labels.some(l => l.name === "enhancement");
+
+            if (isBug) {
+              labelsToAdd.push("bug");
+              welcomeMessage = `
+### 🤖 focuspack Issue Bot
+
+Hi @${issue.user.login}, thank you for reporting this issue!
+
+A maintainer will review this shortly. In the meantime, please make sure your report includes:
+- [ ] Exact command executed (e.g. \`focuspack -F file.py -b 8k\`)
+- [ ] Python version and Operating System
+- [ ] Minimal reproducible code sample (if applicable)
+
+*We appreciate you helping keep focuspack rock-solid!*
+`;
+            } else if (isFeature) {
+              labelsToAdd.push("enhancement");
+              welcomeMessage = `
+### 🤖 focuspack Issue Bot
+
+Hi @${issue.user.login}, thank you for proposing this enhancement!
+
+To keep \`focuspack\` razor-sharp and prevent scope drift, all new capabilities are evaluated against our **[Product Charter (CHARTER.md)](https://github.com/maqbulansari/focuspack/blob/main/CHARTER.md)**:
+
+1. **Focus Target Inviolability:** Focus files are never dropped or naively truncated.
+2. **AST Dependency Contracts:** Interfaces over flat monolithic code dumps.
+3. **Active Adaptive Budgeting:** 4-stage tiering under token constraints.
+4. **Zero-Node Portability:** Pure Python, instant \`pip\` / \`uvx\` execution.
+
+> *Note: Features introducing Non-Goals (vector databases/RAG, cloud services, web GUIs, flat un-budgeted dumps) will be politely declined.*
+
+A maintainer will review your proposal against these pillars. Thank you for contributing to the community!
+`;
+            } else {
+              welcomeMessage = `
+### 🤖 focuspack Issue Bot
+
+Hi @${issue.user.login}, thank you for opening this issue!
+
+A maintainer will triage this shortly. If you are suggesting a feature, please check out our **[Product Charter (CHARTER.md)](https://github.com/maqbulansari/focuspack/blob/main/CHARTER.md)** to see how we evaluate community proposals.
+`;
+            }
+
+            // Apply labels
+            await github.rest.issues.addLabels({
+              owner,
+              repo,
+              issue_number: issueNumber,
+              labels: labelsToAdd,
+            });
+
+            // Post welcome comment
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: issueNumber,
+              body: welcomeMessage,
+            });

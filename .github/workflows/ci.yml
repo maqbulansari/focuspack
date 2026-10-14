@@ -7,8 +7,34 @@ on:
     branches: [ main ]
 
 jobs:
+  lint-and-charter:
+    name: ⚡ Fast Lint & Charter Verification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Ruff & Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff
+
+      - name: Ruff Lint Check
+        run: ruff check .
+
+      - name: Ruff Formatting Check
+        run: ruff format --check .
+
+      - name: Charter & Scope Guard Verification
+        run: python scripts/check_charter.py
+
   test:
-    name: Test (Python ${{ matrix.python-version }} on ${{ matrix.os }})
+    name: 🧪 Test (Python ${{ matrix.python-version }} on ${{ matrix.os }})
+    needs: lint-and-charter
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -17,23 +43,23 @@ jobs:
         python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
-        cache: "pip"
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e ".[dev,all]"
+      - name: Install package and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,all]"
 
-    - name: Run Ruff Lint Check
-      run: |
-        ruff check .
+      - name: Run Test Suite
+        run: pytest -v --cov=focuspack
 
-    - name: Run Pytest
-      run: |
-        pytest -v --cov=focuspack
+      - name: End-to-End CLI Smoke Test
+        run: |
+          python -m focuspack.cli pack -F pyproject.toml -b 8k --strict-budget
+          python -m focuspack.cli analyze
