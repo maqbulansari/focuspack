@@ -1,47 +1,48 @@
 <div align="center">
 
-# 📦 repodigest
+# 🎯 focuspack
 
-**Fast, intelligent codebase packaging & AST-aware context generator for LLMs & Developers**
+**Focus-driven, budget-aware codebase context packager for LLMs**
 
-[![CI](https://github.com/USER/repodigest/actions/workflows/ci.yml/badge.svg)](https://github.com/USER/repodigest/actions)
+[![CI](https://github.com/USER/focuspack/actions/workflows/ci.yml/badge.svg)](https://github.com/USER/focuspack/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 
-*Pack your entire repository into clean, token-efficient prompt context with structural outlines and secret protection in one second.*
+*Don't dump blindly. Pack the exact slice of code your LLM needs with AST contracts, semantic roles, and adaptive token budgets.*
 
-[Quick Start](#-quick-start) • [Key Features](#-key-features) • [CLI Usage](#-cli-usage) • [Configuration](#-configuration) • [Contributing](#-contributing)
+[Quick Start](#-quick-start) • [Why focuspack?](#-why-focuspack-vs-flat-dumpers) • [Key Features](#-key-features) • [CLI Reference](#-cli-reference) • [Contributing](#-contributing)
 
 ---
 
 </div>
 
-## 💡 Why repodigest?
+## 💡 Why focuspack? vs Flat Dumpers
 
-When feeding codebases into LLMs (**Claude 3.5 Sonnet**, **ChatGPT**, **Gemini**, or local models), developers face three major headaches:
+Static file packagers (like Repomix or code2prompt) suffer from a fundamental blind spot: **they treat codebases as flat buckets of files**. If you run them on a 100-file project, they dump all 100 files into a 150k-token monolith.
 
-1. **Token Exhaustion:** Pasting full files quickly hits context limits or wastes expensive tokens on repetitive implementation bodies.
-2. **Accidental Credential Leaks:** Developers routinely paste `.env` values, API keys (OpenAI, AWS, GitHub), or private tokens into cloud chat interfaces by accident.
-3. **Noisy Clutter:** Blindly concatenating directories drags in `node_modules`, lockfiles, binary images, and cache directories.
+### The Attention Breakdown (Lost in the Middle)
+Transformer research proves that as context length grows, reasoning accuracy plummets in the middle 60–80% of the prompt. Dumping 80 irrelevant files dilutes attention heads, causing missed edge cases and hallucinations.
 
-**`repodigest` solves all of this out-of-the-box.**
+### What LLMs Actually Love to Read
+1. **High Signal-to-Noise:** The file you are actively touching in **FULL**.
+2. **Contract-First Dependencies:** When an LLM calls helper functions, it does **not** need 400 lines of implementation logic. It only needs the **interface contract** (class signatures, argument types, return annotations, and docstrings).
+3. **Adaptive Token Budgets:** If you have a 32k or 64k token target, the tool should **actively compress and tier** files to fit—not just fail a CI assertion.
+4. **Semantic Role Labeling:** Tagging files with `role="focus_target"` vs `role="dependency_contract"` explicitly instructs the model what it is allowed to modify versus what is an immutable external API.
 
 ---
 
-## ✨ Key Features
+## ⚡ Feature Comparison
 
-- 🧠 **AST Skeleton Mode:** Automatically parses Python (AST) and JS/TS/Go/Rust files to extract classes, type annotations, signatures, and docstrings while stripping function bodies. **Saves up to 80% tokens** while giving the LLM the complete architecture!
-- 🔒 **Active Secret Safeguards:** Built-in scanner automatically detects and redacts OpenAI, Anthropic, AWS, GitHub, and private keys before your prompt is ever generated.
-- ⚡ **Smart Ignore & Filtering:** Full `.gitignore` wildmatch support + built-in defaults that filter binaries, lockfiles (`package-lock.json`, `poetry.lock`), and virtual environments.
-- 📋 **Zero-Friction Clipboard:** `--copy` instantly places the formatted digest onto your system clipboard (Windows, macOS, Linux) for pasting straight into AI chats.
-- 📐 **Multiple Formats:**
-  - `markdown`: Clean Markdown with code fences and table of contents.
-  - `xml`: Claude/Anthropic prompt-optimized `<documents><document>` structure.
-  - `json`: Machine-readable schema for automated pipelines.
-  - `plain`: Clean delimiter-separated text.
-- 📊 **Token Analytics:** Accurate token count estimation with per-extension breakdown tables and largest-file detection.
-- 🪶 **Lightweight & Fast:** Pure Python core, minimal dependencies, sub-second execution on large repos.
+| Capability | Flat Dumpers (Repomix, etc.) | 🎯 focuspack |
+| :--- | :---: | :---: |
+| **Selection Model** | Flat / Dump All (or manual globs) | **Focus-Driven Graph** (`--focus src/auth.py`) |
+| **Dependency Awareness** | ❌ None (no AST import traversal) | ✅ **Automated import graph discovery** |
+| **Token Budgeting** | ❌ Dummy exit-code check | ✅ **Active Adaptive Fitting** (`--budget 32k`) |
+| **Multi-Tier Compression** | ❌ Global all-or-nothing flag | ✅ **Tiered**: Focus is Full, dependencies are Contracts |
+| **Semantic Role Tags** | ❌ Generic `<file path="...">` | ✅ `<file role="focus_target\|dependency_contract">` |
+| **Task / Mission Framing** | ❌ Raw code dump | ✅ `--task bugfix\|review\|refactor` system anchors |
+| **Runtime Requirement** | ⚠️ Node.js / NPM (`npx repomix`) | ✅ **Zero-Node Pure Python** (`pip`, `uvx`) |
 
 ---
 
@@ -51,104 +52,127 @@ When feeding codebases into LLMs (**Claude 3.5 Sonnet**, **ChatGPT**, **Gemini**
 
 ```bash
 # Install via pip
-pip install repodigest
+pip install focuspack
 
-# Or run instantly with pipx / uv
-pipx run repodigest
+# Or run instantly with uvx / pipx
+uvx focuspack
 ```
 
-### 1-Minute Usage
+### 1-Minute Workflows
 
 ```bash
-# Package current directory into digest.md
-repodigest
+# 1. Target a specific file — packages auth.py in FULL and its imported dependencies as Skeletons:
+focuspack --focus src/auth/service.py
 
-# Package and copy directly to clipboard for ChatGPT / Claude
-repodigest --copy
+# 2. Fit strictly within a 32k token window with zero overflow:
+focuspack --focus src/auth/service.py --budget 32k
 
-# Compress large files into AST skeletons to save tokens
-repodigest --mode skeleton --copy
+# 3. Add an automated debugging mission and copy straight to clipboard:
+focuspack --focus src/payment.py --task bugfix --copy
 
-# Output Claude-optimized XML format
-repodigest --format xml -o prompt.xml
-
-# Package only your uncommitted / staged git changes
-repodigest diff --copy
+# 4. Package git-modified files + their connected contracts:
+focuspack diff --copy
 ```
 
 ---
 
-## 🖥️ Terminal Experience
+## 📦 Output Format (Claude & LLM Optimized)
 
-Inspect your codebase metrics without generating a digest:
+By default, `focuspack` generates semantic XML structured for Anthropic Claude 3.5/3.7, OpenAI GPT-4o, and Gemini:
 
-```bash
-repodigest analyze
+```xml
+<documents>
+  <context_manifest>
+    <tool>focuspack v0.2.0</tool>
+    <token_budget total_allowed="32000" tokens_used="14520" utilization="45.4%" status="fits"/>
+    <role_counts focus_targets="1" dependency_contracts="3"/>
+  </context_manifest>
+
+  <directory_structure>
+  src/
+  ├── auth/
+  │   └── service.py  [FOCUS]
+  └── db/
+      └── client.py   [CONTRACT]
+  </directory_structure>
+
+  <files>
+    <file index="1" path="src/auth/service.py" role="focus_target" mode="full" tokens="3420">
+      <document_content>
+        <!-- Full implementation code of the focus target -->
+      </document_content>
+    </file>
+
+    <file index="2" path="src/db/client.py" role="dependency_contract" mode="skeleton" tokens="380">
+      <document_content>
+        <!-- AST Contract: classes, methods, type hints, docstrings without bodies -->
+      </document_content>
+    </file>
+  </files>
+
+  <task_instruction>
+    You are a principal debugging engineer. Analyze the enclosed focus targets and their dependency contracts...
+  </task_instruction>
+</documents>
 ```
 
-```text
-╭───────────────────────── repodigest v0.1.0 ─────────────────────────╮
-│  Total Files Included    18                                         │
-│  Total Lines of Code     2,450                                      │
-│  Estimated Tokens        ~14,280                                    │
-│  Total Codebase Size     84.2 KB                                    │
-│  Destination             digest.md                                  │
-╰─────────────────────────────────────────────────────────────────────╯
-```
+*(Also supports `--format markdown`, `--format json`, and `--format plain`).*
 
 ---
 
-## 📖 CLI Usage
+## 📖 CLI Reference
 
 ```text
-Usage: repodigest [OPTIONS] COMMAND [ARGS]...
+Usage: focuspack [OPTIONS] COMMAND [ARGS]...
 
 Options:
   -v, --version  Show version and exit.
   --help         Show this message and exit.
 
 Commands:
-  pack     Package repository into an optimized context document.
-  analyze  Inspect codebase metrics, token counts, and language distribution.
-  diff     Package only git uncommitted and staged changes.
-  init     Create a .repodigest.json configuration file.
+  pack     Package focused codebase context optimized for LLMs.
+  analyze  Inspect repository dependency graph, token metrics, and largest files.
+  diff     Package only git-changed files + their connected dependency contracts.
+  init     Create a .focuspack.json configuration file.
 ```
 
-### `repodigest pack` Options
+### `focuspack pack` Options
 
 | Option | Flag | Description | Default |
 | :--- | :--- | :--- | :--- |
-| `--output` | `-o` | Output file path | `digest.<format>` |
-| `--format` | `-f` | Output format (`markdown`, `xml`, `json`, `plain`) | `markdown` |
-| `--mode` | `-m` | Inclusion mode (`full`, `skeleton`, `auto`) | `full` |
-| `--copy` | `-c` | Copy digest directly to system clipboard | `False` |
-| `--stdout` | | Stream formatted output directly to stdout | `False` |
-| `--diff` | | Only include git-modified or staged files | `False` |
-| `--include` | `-i` | Glob patterns to include (e.g. `*.py`, `src/**`) | `None` |
-| `--exclude` | `-e` | Glob patterns to exclude | `None` |
-| `--max-size` | | Maximum file size threshold (e.g. `500kb`, `1mb`) | `500kb` |
-| `--no-redact-secrets` | | Disable secret scanning and redaction | `False` |
-| `--no-tree` | | Omit directory ASCII tree from digest | `False` |
-| `--quiet` | `-q` | Suppress banner and progress bars | `False` |
+| `--focus` | `-F` | File(s) or directories to focus on (kept in Full; imports become Contracts) | `None` |
+| `--depth` | `-d` | Dependency traversal depth (1 = direct imports, 2 = 2 hops) | `1` |
+| `--budget` | `-b` | Token budget (e.g. `32k`, `64k`). Dynamically tiers files to fit | `None` |
+| `--task` | `-t` | Task prompt template (`bugfix`, `review`, `refactor`, `explain`, `test`) | `None` |
+| `--format` | `-f` | Output format (`xml`, `markdown`, `json`, `plain`) | `xml` |
+| `--mode` | `-m` | Compression mode (`auto`, `full`, `skeleton`) | `auto` |
+| `--copy` | `-c` | Copy output directly to system clipboard | `False` |
+| `--stdout` | | Stream output directly to stdout | `False` |
+| `--diff` | | Focus on git uncommitted/staged changes + connected contracts | `False` |
+| `--output` | `-o` | Output file path | `context.<format>` |
+| `--no-redact-secrets` | | Disable automated secret redaction | `False` |
+| `--quiet` | `-q` | Suppress console UI | `False` |
 
 ---
 
 ## ⚙️ Configuration
 
-Generate a configuration file in your project root:
+Generate a configuration file with:
 
 ```bash
-repodigest init
+focuspack init
 ```
 
-This creates `.repodigest.json`:
+Creates `.focuspack.json`:
 
 ```json
 {
-  "output_format": "markdown",
-  "mode": "full",
+  "output_format": "xml",
+  "mode": "auto",
+  "token_budget": 32000,
+  "focus_depth": 1,
+  "focus_targets": [],
   "max_size": "500kb",
-  "include": [],
   "exclude": [
     "docs/build/**",
     "scratch/**"
@@ -163,12 +187,12 @@ This creates `.repodigest.json`:
 
 ## 🤝 Contributing
 
-We welcome community contributions, bug reports, and suggestions!
-Please see [CONTRIBUTING.md](CONTRIBUTING.md) for local development setup and guidelines.
+Contributions, issues, and feature requests are welcome!
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local dev setup and guidelines.
 
 1. Fork the repo & clone locally
-2. Create your branch (`git checkout -b feature/amazing-feature`)
-3. Install dev dependencies (`pip install -e ".[dev]"`)
+2. Create your branch (`git checkout -b feature/awesome-feature`)
+3. Install dependencies (`pip install -e ".[dev,all]"`)
 4. Run tests (`pytest`)
 5. Open a Pull Request
 

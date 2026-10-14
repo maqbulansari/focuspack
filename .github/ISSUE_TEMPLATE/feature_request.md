@@ -1,6 +1,6 @@
 ---
 name: Feature Request
-about: Suggest an idea or new capability for repodigest
+about: Suggest an idea or new capability for focuspack
 title: '[FEAT] '
 labels: enhancement
 assignees: ''

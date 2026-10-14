@@ -1,6 +1,6 @@
-# Contributing to repodigest
+# Contributing to focuspack
 
-Thank you for your interest in contributing to **repodigest**! We welcome bug fixes, documentation improvements, new features, and community suggestions.
+Thank you for your interest in contributing to **focuspack**! We welcome bug fixes, documentation improvements, new features, and community suggestions.
 
 ---
 
@@ -12,8 +12,8 @@ Thank you for your interest in contributing to **repodigest**! We welcome bug fi
 
 ### 2. Clone the Repository
 ```bash
-git clone https://github.com/USER/repodigest.git
-cd repodigest
+git clone https://github.com/USER/focuspack.git
+cd focuspack
 ```
 
 ### 3. Create a Virtual Environment
@@ -43,7 +43,7 @@ pytest
 
 ### Run Tests with Coverage
 ```bash
-pytest --cov=repodigest
+pytest --cov=focuspack
 ```
 
 ### Code Formatting and Linting
@@ -70,7 +70,7 @@ ruff format .
    ```
 4. **Commit with conventional messages:**
    ```bash
-   git commit -m "feat: add support for Kotlin AST skeleton extraction"
+   git commit -m "feat: add support for Go interface extraction"
    ```
 5. **Push and open a PR** against the `main` branch.
 

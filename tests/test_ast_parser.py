@@ -1,6 +1,6 @@
 """Tests for ASTParser."""
 
-from repodigest.ast_parser import ASTParser
+from focuspack.ast_parser import ASTParser
 
 
 def test_python_skeleton_extraction():

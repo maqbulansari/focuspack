@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from repodigest.config import SECRET_PATTERNS
+from focuspack.config import SECRET_PATTERNS
 
 
 @dataclass

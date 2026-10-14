@@ -3,27 +3,26 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "repodigest"
-version = "0.1.0"
-description = "Fast, intelligent codebase packaging & AST-aware context generator for LLMs & Developers"
+name = "focuspack"
+version = "0.2.0"
+description = "Focus-driven, budget-aware codebase context packager for LLMs"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
 authors = [
-    { name = "repodigest contributors" }
+    { name = "focuspack contributors" }
 ]
 keywords = [
-    "cli",
-    "developer-tools",
     "llm",
-    "codebase-context",
-    "ast-analysis",
-    "git",
+    "context-engineering",
+    "prompt-caching",
+    "token-budget",
+    "codebase-to-prompt",
     "claude",
     "chatgpt",
     "gemini",
-    "markdown",
-    "token-counter"
+    "ast-analysis",
+    "cli"
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -64,17 +63,17 @@ dev = [
 ]
 
 [project.scripts]
-repodigest = "repodigest.cli:main"
-rdigest = "repodigest.cli:main"
+focuspack = "focuspack.cli:main"
+fp = "focuspack.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/USER/repodigest"
-Repository = "https://github.com/USER/repodigest"
-Issues = "https://github.com/USER/repodigest/issues"
-Documentation = "https://github.com/USER/repodigest#readme"
+Homepage = "https://github.com/USER/focuspack"
+Repository = "https://github.com/USER/focuspack"
+Issues = "https://github.com/USER/focuspack/issues"
+Documentation = "https://github.com/USER/focuspack#readme"
 
 [tool.hatch.build.targets.wheel]
-packages = ["repodigest"]
+packages = ["focuspack"]
 
 [tool.ruff]
 line-length = 100

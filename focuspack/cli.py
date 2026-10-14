@@ -1,6 +1,6 @@
 """
-Command Line Interface for repodigest.
-Powered by Click and Rich for exceptional terminal developer experience.
+Command Line Interface for focuspack.
+Powered by Click and Rich for an exceptional developer experience.
 """
 
 from __future__ import annotations
@@ -14,34 +14,32 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from repodigest import __version__
-from repodigest.analyzer import Analyzer
-from repodigest.clipboard import copy_to_clipboard
-from repodigest.collector import Collector
-from repodigest.config import RepoDigestConfig
-from repodigest.formatter import Formatter
+from focuspack import __version__
+from focuspack.analyzer import Analyzer
+from focuspack.clipboard import copy_to_clipboard
+from focuspack.collector import Collector
+from focuspack.config import FocusPackConfig
+from focuspack.formatter import Formatter
+from focuspack.graph import FileRole
 
 console = Console()
 err_console = Console(stderr=True)
 
 
-def parse_size_string(size_str: str) -> int:
-    """Parse strings like '500kb', '2mb', '1024' into bytes."""
-    clean = size_str.strip().lower()
-    if clean.endswith(("kb", "k")):
-        val = float(clean.rstrip("kb").rstrip("k"))
-        return int(val * 1024)
-    elif clean.endswith(("mb", "m")):
-        val = float(clean.rstrip("mb").rstrip("m"))
-        return int(val * 1024 * 1024)
-    elif clean.endswith(("gb", "g")):
-        val = float(clean.rstrip("gb").rstrip("g"))
-        return int(val * 1024 * 1024 * 1024)
+def parse_tokens_or_size(val_str: str) -> int:
+    """Parse tokens like '32k', '64k', '100000', or '500kb' into integers."""
+    clean = val_str.strip().lower()
+    if clean.endswith("k") or clean.endswith("kb"):
+        num = float(clean.rstrip("kb").rstrip("k"))
+        return int(num * 1000)
+    elif clean.endswith("m") or clean.endswith("mb"):
+        num = float(clean.rstrip("mb").rstrip("m"))
+        return int(num * 1_000_000)
     return int(clean)
 
 
-def render_summary_panel(stats, findings_count: int, output_dest: str = ""):
-    """Render a beautiful Rich panel summarizing the digest run."""
+def render_summary_panel(stats, collector: Collector, output_dest: str = ""):
+    """Render a clean Rich panel summarizing the context run."""
     table = Table(show_header=False, box=None, padding=(0, 2))
     table.add_column("Metric", style="bold cyan")
     table.add_column("Value", style="bold white")
@@ -51,16 +49,34 @@ def render_summary_panel(stats, findings_count: int, output_dest: str = ""):
     table.add_row("Estimated Tokens", f"~{stats.total_tokens:,}")
     table.add_row("Total Codebase Size", Analyzer.format_bytes(stats.total_bytes))
 
-    if findings_count > 0:
-        table.add_row("Secrets Redacted", f"[bold yellow]{findings_count}[/bold yellow]")
+    # Focus and contract counts
+    focus_count = sum(1 for f in collector.graph.nodes.values() if f.role == FileRole.FOCUS_TARGET)
+    contract_count = sum(
+        1 for f in collector.graph.nodes.values() if f.role == FileRole.DEPENDENCY_CONTRACT
+    )
+    if focus_count > 0:
+        table.add_row("Focus Targets", f"[bold green]{focus_count}[/bold green]")
+        table.add_row("Dependency Contracts", f"[bold yellow]{contract_count}[/bold yellow]")
+
+    # Budget info
+    if collector.budget_report:
+        report = collector.budget_report
+        b_color = "green" if report.is_within_budget else "yellow"
+        table.add_row(
+            "Token Budget",
+            f"[{b_color}]{report.final_tokens:,} / {report.total_budget:,} ({report.utilization_pct:.1f}%)[/{b_color}]",
+        )
+
+    if collector.findings:
+        table.add_row("Secrets Redacted", f"[bold red]{len(collector.findings)}[/bold red]")
 
     if output_dest:
         table.add_row("Destination", f"[green]{output_dest}[/green]")
 
     panel = Panel(
         table,
-        title=f"[bold green]repodigest v{__version__}[/bold green]",
-        subtitle="[dim]Context ready for Claude, ChatGPT, Gemini[/dim]",
+        title=f"[bold green]focuspack v{__version__}[/bold green]",
+        subtitle="[dim]Focus-Driven LLM Context[/dim]",
         border_style="green",
     )
     console.print(panel)
@@ -71,10 +87,10 @@ def render_summary_panel(stats, findings_count: int, output_dest: str = ""):
 @click.pass_context
 def cli(ctx: click.Context, version: bool):
     """
-    [bold green]repodigest[/bold green]: Fast, intelligent codebase packaging & AST-aware context generator.
+    [bold green]focuspack[/bold green]: Focus-driven, budget-aware codebase context packager for LLMs.
     """
     if version:
-        console.print(f"[bold green]repodigest[/bold green] version [cyan]{__version__}[/cyan]")
+        console.print(f"[bold green]focuspack[/bold green] version [cyan]{__version__}[/cyan]")
         ctx.exit(0)
 
     if ctx.invoked_subcommand is None:
@@ -84,48 +100,75 @@ def cli(ctx: click.Context, version: bool):
 @cli.command()
 @click.argument("path", default=".", type=click.Path(exists=True, file_okay=False, dir_okay=True))
 @click.option(
+    "--focus",
+    "-F",
+    multiple=True,
+    help="Primary file(s) or directories to focus on (kept in FULL; dependencies become contracts).",
+)
+@click.option(
+    "--depth",
+    "-d",
+    default=1,
+    show_default=True,
+    help="Dependency graph traversal depth for contracts.",
+)
+@click.option(
+    "--budget",
+    "-b",
+    type=str,
+    default=None,
+    help="Target token budget (e.g. '32k', '64k', '128k'). Adaptively tiers files to fit.",
+)
+@click.option(
+    "--task",
+    "-t",
+    type=str,
+    default=None,
+    help="Task prompt template ('bugfix', 'review', 'refactor', 'explain', 'test', or custom prompt).",
+)
+@click.option(
     "--output",
     "-o",
     type=click.Path(dir_okay=False),
-    help="Output file path (defaults to digest.<format>).",
+    help="Output file path (defaults to context.<format>).",
 )
 @click.option(
     "--format",
     "-f",
-    type=click.Choice(["markdown", "xml", "json", "plain"], case_sensitive=False),
-    default="markdown",
+    type=click.Choice(["xml", "markdown", "json", "plain"], case_sensitive=False),
+    default="xml",
     show_default=True,
-    help="Target serialization format.",
+    help="Target serialization format (XML recommended for Claude/LLMs).",
 )
 @click.option(
     "--mode",
     "-m",
-    type=click.Choice(["full", "skeleton", "auto"], case_sensitive=False),
-    default="full",
+    type=click.Choice(["auto", "full", "skeleton"], case_sensitive=False),
+    default="auto",
     show_default=True,
-    help="Code inclusion mode. 'skeleton' extracts AST signatures to save tokens.",
+    help="Compression mode ('auto' tiers focus targets in full and dependencies as skeletons).",
 )
 @click.option(
     "--copy",
     "-c",
     is_flag=True,
-    help="Copy the generated digest directly to the system clipboard.",
+    help="Copy the generated context directly to the system clipboard.",
 )
 @click.option(
     "--stdout",
     is_flag=True,
-    help="Print the formatted digest directly to standard output.",
+    help="Stream formatted context directly to standard output.",
 )
 @click.option(
     "--diff",
     is_flag=True,
-    help="Only package files with uncommitted or staged changes in git.",
+    help="Automatically focus on uncommitted & staged git changes + their dependency contracts.",
 )
 @click.option(
     "--include",
     "-i",
     multiple=True,
-    help="Glob patterns to include (e.g. '*.py', 'src/*').",
+    help="Glob patterns to include.",
 )
 @click.option(
     "--exclude",
@@ -137,7 +180,7 @@ def cli(ctx: click.Context, version: bool):
     "--max-size",
     default="500kb",
     show_default=True,
-    help="Maximum file size to package (e.g. 500kb, 1mb).",
+    help="Maximum file size to package.",
 )
 @click.option(
     "--redact-secrets/--no-redact-secrets",
@@ -159,6 +202,10 @@ def cli(ctx: click.Context, version: bool):
 )
 def pack(
     path: str,
+    focus: tuple[str, ...],
+    depth: int,
+    budget: str | None,
+    task: str | None,
     output: str | None,
     format: str,
     mode: str,
@@ -173,18 +220,30 @@ def pack(
     quiet: bool,
 ):
     """
-    Package repository into an optimized context document.
+    Package focused codebase context optimized for LLMs.
     """
     try:
-        max_bytes = parse_size_string(max_size)
+        max_bytes = parse_tokens_or_size(max_size)
     except Exception:
         err_console.print(f"[bold red]Error:[/bold red] Invalid max-size value: {max_size}")
         sys.exit(1)
 
-    config = RepoDigestConfig(
+    parsed_budget: int | None = None
+    if budget:
+        try:
+            parsed_budget = parse_tokens_or_size(budget)
+        except Exception:
+            err_console.print(f"[bold red]Error:[/bold red] Invalid budget value: {budget}")
+            sys.exit(1)
+
+    config = FocusPackConfig(
         root_path=path,
         output_format=format.lower(),
         mode=mode.lower(),
+        focus_targets=list(focus),
+        focus_depth=depth,
+        token_budget=parsed_budget,
+        task_template=task,
         max_file_size_bytes=max_bytes,
         include_patterns=list(include),
         exclude_patterns=list(exclude),
@@ -194,7 +253,9 @@ def pack(
 
     collector = Collector(config)
     if not quiet and not stdout:
-        with console.status("[bold green]Scanning and analyzing repository...[/bold green]"):
+        with console.status(
+            "[bold green]Building dependency graph and optimizing context...[/bold green]"
+        ):
             files = collector.collect(git_diff_only=diff)
             stats = Analyzer.compute_stats(files)
             file_tree = collector.build_file_tree(files)
@@ -215,6 +276,8 @@ def pack(
         file_tree=file_tree,
         fmt=format.lower(),
         include_tree=tree,
+        budget_report=collector.budget_report,
+        task_prompt=task,
     )
 
     # Output routing
@@ -223,11 +286,10 @@ def pack(
         click.echo(output_text)
         return
 
-    # Default output filename if not writing to stdout and not specified
     target_output_file = output
     if target_output_file is None and not copy:
-        ext_map = {"markdown": "md", "xml": "xml", "json": "json", "plain": "txt"}
-        target_output_file = f"digest.{ext_map.get(format.lower(), 'md')}"
+        ext_map = {"xml": "xml", "markdown": "md", "json": "json", "plain": "txt"}
+        target_output_file = f"context.{ext_map.get(format.lower(), 'xml')}"
 
     if target_output_file:
         out_path = Path(target_output_file)
@@ -244,40 +306,30 @@ def pack(
     if not quiet:
         render_summary_panel(
             stats=stats,
-            findings_count=len(collector.findings),
+            collector=collector,
             output_dest=" & ".join(dest_msg) if dest_msg else "Done",
         )
-
-        if collector.findings and not redact_secrets:
-            console.print(
-                f"[bold red]Alert:[/bold red] Found {len(collector.findings)} potential secrets in files!"
-            )
 
 
 @cli.command()
 @click.argument("path", default=".", type=click.Path(exists=True, file_okay=False, dir_okay=True))
 @click.option(
-    "--top",
-    "-n",
-    default=5,
-    show_default=True,
-    help="Number of largest files to display.",
+    "--top", "-n", default=5, show_default=True, help="Number of largest files to display."
 )
 def analyze(path: str, top: int):
     """
-    Inspect codebase metrics, token counts, and language distribution.
+    Inspect repository dependency graph, token metrics, and largest files.
     """
-    config = RepoDigestConfig(root_path=path)
+    config = FocusPackConfig(root_path=path)
     collector = Collector(config)
 
-    with console.status("[bold cyan]Analyzing repository metrics...[/bold cyan]"):
+    with console.status("[bold cyan]Analyzing repository graph and metrics...[/bold cyan]"):
         files = collector.collect()
         stats = Analyzer.compute_stats(files)
-        collector.build_file_tree(files)
 
-    render_summary_panel(stats, len(collector.findings))
+    render_summary_panel(stats, collector)
 
-    # Extensions Breakdown Table
+    # Extension Breakdown Table
     ext_table = Table(title="Language / Extension Breakdown", header_style="bold magenta")
     ext_table.add_column("Extension", style="cyan")
     ext_table.add_column("Files", justify="right")
@@ -316,32 +368,43 @@ def analyze(path: str, top: int):
 
 @cli.command()
 @click.argument("path", default=".", type=click.Path(exists=True, file_okay=False, dir_okay=True))
-@click.option("--output", "-o", help="Output file path.")
+@click.option("--budget", "-b", help="Target token budget (e.g. 32k).")
+@click.option("--task", "-t", help="Task prompt template.")
 @click.option("--copy", "-c", is_flag=True, help="Copy to clipboard.")
+@click.option("--output", "-o", help="Output file path.")
 @click.pass_context
-def diff(ctx: click.Context, path: str, output: str | None, copy: bool):
+def diff(
+    ctx: click.Context,
+    path: str,
+    budget: str | None,
+    task: str | None,
+    copy: bool,
+    output: str | None,
+):
     """
-    Package only git uncommitted and staged changes.
+    Package only git-changed files + their connected dependency contracts.
     """
-    ctx.invoke(pack, path=path, output=output, copy=copy, diff=True)
+    ctx.invoke(pack, path=path, budget=budget, task=task, copy=copy, output=output, diff=True)
 
 
 @cli.command()
 @click.argument("path", default=".", type=click.Path(exists=True, file_okay=False, dir_okay=True))
 def init(path: str):
     """
-    Create a .repodigest.json configuration file.
+    Create a .focuspack.json configuration file.
     """
-    target = Path(path) / ".repodigest.json"
+    target = Path(path) / ".focuspack.json"
     if target.exists():
         console.print(f"[yellow]Configuration file already exists:[/yellow] {target}")
         return
 
     default_config = {
-        "output_format": "markdown",
-        "mode": "full",
+        "output_format": "xml",
+        "mode": "auto",
+        "token_budget": 32000,
+        "focus_depth": 1,
+        "focus_targets": [],
         "max_size": "500kb",
-        "include": [],
         "exclude": ["docs/build/**", "scratch/**"],
         "respect_gitignore": True,
         "redact_secrets": True,

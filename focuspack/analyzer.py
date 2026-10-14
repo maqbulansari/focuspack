@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from repodigest.collector import CollectedFile
+    from focuspack.collector import CollectedFile
 
 # Global tokenizer cache
 _TIKTOKEN_ENCODER = None

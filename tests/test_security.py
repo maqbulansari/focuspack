@@ -1,6 +1,6 @@
 """Tests for SecurityScanner."""
 
-from repodigest.security import SecurityScanner
+from focuspack.security import SecurityScanner
 
 
 def test_openai_key_detection_and_redaction():

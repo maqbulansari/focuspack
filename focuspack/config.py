@@ -1,5 +1,5 @@
 """
-Configuration constants, default patterns, and security rules for repodigest.
+Configuration constants, default patterns, and models for focuspack.
 """
 
 from __future__ import annotations
@@ -69,11 +69,14 @@ DEFAULT_IGNORE_PATTERNS: list[str] = [
     "*.cer",
     "*.pfx",
     "*.p12",
-    # repodigest outputs
-    "*.digest.md",
-    "*.digest.json",
-    "*.digest.xml",
+    # focuspack outputs
+    "*.focuspack.md",
+    "*.focuspack.xml",
+    "*.focuspack.json",
+    "context.xml",
+    "context.md",
     "digest.md",
+    "digest.xml",
 ]
 
 # Known binary extensions
@@ -172,18 +175,22 @@ SECRET_PATTERNS: list[tuple[str, Pattern[str]]] = [
 
 
 @dataclass
-class RepoDigestConfig:
-    """Configuration settings for repodigest run."""
+class FocusPackConfig:
+    """Configuration settings for focuspack execution."""
 
     root_path: str = "."
-    output_format: str = "markdown"  # markdown, xml, json, plain
-    mode: str = "full"  # full, skeleton, auto
+    output_format: str = "xml"  # xml (recommended for LLMs), markdown, json, plain
+    mode: str = "auto"  # auto (tiered), full, skeleton
+    focus_targets: list[str] = field(default_factory=list)  # Files/directories of interest
+    focus_depth: int = 1  # How many dependency hops to include
+    token_budget: int | None = None  # e.g., 32000, 64000
+    task_template: str | None = None  # e.g., "bugfix", "review", "refactor", "explain"
+    custom_task_prompt: str | None = None
     max_file_size_bytes: int = 500 * 1024  # 500 KB limit
     include_patterns: list[str] = field(default_factory=list)
     exclude_patterns: list[str] = field(default_factory=list)
     respect_gitignore: bool = True
     redact_secrets: bool = True
-    fail_on_secrets: bool = False
     include_tree: bool = True
     output_file: str | None = None
     copy_to_clipboard: bool = False
