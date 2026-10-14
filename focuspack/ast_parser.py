@@ -31,13 +31,13 @@ def _format_docstring(doc: str, indent: str = "", is_module: bool = False) -> li
         except Exception:
             escaped = doc.replace("\\", "\\\\")
             if '"""' in escaped:
-                escaped = escaped.replace('"""', r'\"\"\"')
+                escaped = escaped.replace('"""', r"\"\"\"")
             if is_module:
                 return [f'"""\n{escaped}\n"""']
             return [f'{indent}"""{escaped}"""']
     else:
         if '"""' in doc:
-            escaped = doc.replace('"""', r'\"\"\"')
+            escaped = doc.replace('"""', r"\"\"\"")
             if is_module:
                 return [f'"""\n{escaped}\n"""']
             return [f'{indent}"""{escaped}"""']

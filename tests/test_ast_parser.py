@@ -85,8 +85,9 @@ def get_app_dir(app_name: str) -> str:
 '''
     skeleton = ASTParser.extract_python_skeleton(code)
     import ast
+
     # Skeletons must be valid parseable Python without raising SyntaxError
     tree = ast.parse(skeleton)
     assert tree is not None
     assert "C:\\Users\\<user>\\AppData" in skeleton or r"C:\Users\<user>\AppData" in skeleton
-    assert "r\"\"\"" in skeleton
+    assert 'r"""' in skeleton
