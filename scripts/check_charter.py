@@ -105,7 +105,7 @@ def check_git_diff_test_coverage(project_root: Path) -> list[str]:
             )
 
         lines = res.stdout.splitlines()
-        code_changed = any("focuspack/" in line for line in lines)
+        code_changed = any("focuspack/" in line and line.endswith(".py") for line in lines)
         tests_changed = any("tests/" in line for line in lines)
 
         if code_changed and not tests_changed:

@@ -11,13 +11,11 @@
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![Type-Checked: PEP 561](https://img.shields.io/badge/Typing-PEP%20561-blue.svg)](focuspack/py.typed)
-[![Security: Zero Egress](https://img.shields.io/badge/Security-Zero%20Egress%20%7C%20100%25%20Offline-green.svg)](SECURITY.md)
-[![Charter Certified](https://img.shields.io/badge/Charter-Pure%20Python%20%7C%20Zero%20Bloat-brightgreen.svg)](CHARTER.md)
-[![Compliance](https://img.shields.io/badge/Compliance-SOC2%20%2F%20ISO%2027001%20Ready-blue.svg)](SECURITY.md)
+[![Security: 100% Offline](https://img.shields.io/badge/Security-100%25%20Offline%20%7C%20Zero%20Egress-green.svg)](SECURITY.md)
 
 *Don't dump blindly. Pack the exact slice of code your LLM needs with AST contracts, semantic roles, and adaptive token budgets.*
 
-[Quick Start](#-quick-start) • [Why focuspack?](#-why-focuspack) • [How Budgeting Works](#-adaptive-multi-stage-budget-engine) • [Comparison](#-competitive-comparison) • [Python SDK](#-programmatic-python-api) • [Benchmarks](#-empirical-benchmark--reproducibility) • [Certifications & Security](#-security-privacy--certifications) • [CLI Reference](#-cli-reference) • [Product Charter](CHARTER.md) • [Contributing](#-contributing)
+[Quick Start](#-quick-start) • [Why focuspack?](#-why-focuspack) • [How Budgeting Works](#-adaptive-multi-stage-budget-engine) • [Comparison](#-competitive-comparison) • [Python SDK](#-programmatic-python-api) • [Benchmarks](#-empirical-benchmark--reproducibility) • [Security & Privacy](#-security--privacy) • [CLI Reference](#-cli-reference) • [Product Charter](CHARTER.md) • [Contributing](#-contributing)
 
 ---
 
@@ -174,7 +172,7 @@ By default, `focuspack` generates semantic XML structured for Anthropic Claude 3
 
 ---
 
-## 🛡️ Security, Privacy & Certifications
+## 🛡️ Security & Privacy
 
 `focuspack` is engineered from the ground up for strict, zero-trust development environments:
 
@@ -189,12 +187,12 @@ Unlike flat dumpers that either leak plaintext credentials or destructively drop
 - **100% Offline Execution:** `focuspack` contains zero network calls, telemetry, or analytics tracking.
 - **No LLM Proxying:** Does not send your code to external APIs or third-party servers; outputs deterministic local files for your direct inspection.
 
-### 3. Enterprise Compliance Compatibility
-- **SOC 2 & ISO 27001 Ready:** Zero data retention, ephemeral memory processing, and proactive secret masking before prompt injection.
-- **HIPAA Data Minimization:** Context is strictly trimmed to the specified focus targets and interface contracts, omitting unrelated files.
+### 3. Safe Static Analysis
+- **Zero Dynamic Execution:** Inspects code via Python standard library `ast.parse` without importing modules, calling `eval()`, or invoking untrusted binaries.
+- **Data Minimization:** Context is strictly trimmed to the specified focus targets and interface contracts, omitting unrelated files.
 - **Type-Check Certified:** PEP 561 compliant (`py.typed`) for static typing verification with Mypy and Pyright.
 
-See our formal **[Security Policy & Compliance Documentation (SECURITY.md)](SECURITY.md)** for vulnerability reporting procedures and architectural attestations.
+See our **[Security Policy (SECURITY.md)](SECURITY.md)** for vulnerability reporting procedures and architectural attestations.
 
 ---
 
