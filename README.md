@@ -11,7 +11,7 @@
 
 *Don't dump blindly. Pack the exact slice of code your LLM needs with AST contracts, semantic roles, and adaptive token budgets.*
 
-[Quick Start](#-quick-start) • [Why focuspack?](#-why-focuspack) • [How Budgeting Works](#-adaptive-multi-stage-budget-engine) • [Comparison](#-competitive-comparison) • [CLI Reference](#-cli-reference) • [Product Charter](CHARTER.md) • [Contributing](#-contributing)
+[Quick Start](#-quick-start) • [Why focuspack?](#-why-focuspack) • [How Budgeting Works](#-adaptive-multi-stage-budget-engine) • [Comparison](#-competitive-comparison) • [Python SDK](#-programmatic-python-api) • [Benchmarks](#-empirical-benchmark--reproducibility) • [CLI Reference](#-cli-reference) • [Product Charter](CHARTER.md) • [Contributing](#-contributing)
 
 ---
 
@@ -40,11 +40,13 @@ How `focuspack` compares against flat dumpers and other context tools under cons
 | :--- | :---: | :---: | :---: | :---: |
 | **Selection Model** | Flat / Dump All (globs) | Focus Path | Focus Path | **Focus-Driven Graph** (`-F`) |
 | **Dependency Awareness** | ❌ None | Import-edge graph | Query import expansion (None in `--files`) | ✅ **AST Import Graph (BFS)** |
-| **Target Preservation under Budget** | N/A (no budget fitting) | ❌ **Drops target file** at low budgets | ❌ **Truncates mid-line** | ✅ **Preserves target; compresses tiered** |
+| **Target Preservation under Budget** | N/A (no budget fitting) | ❌ **Drops target file** at low budgets | ❌ **Truncates mid-line** (0 files at $\le$ 2k) | ✅ **Preserves target; compresses tiered** |
 | **Budget Enforcement** | ❌ Exit code 1 check only | Silent file omission | String slicing | ✅ **5-Stage Adaptive Optimizer** (Full Rendered Count) |
 | **AST Interface Skeletons** | Global `--compress` flag | AST Signatures Only | ❌ None | ✅ **Python AST + JS/TS outline** |
+| **Secret & Credential Handling** | ❌ Destructive (deletes whole files) | ❌ Plaintext leak | ❌ None | ✅ **In-Place Redaction (keeps file intact)** |
 | **Semantic Role Tags** | ❌ `<file path="...">` | ❌ None | ❌ None | ✅ `<file role="focus_target\|dependency_contract">` |
 | **Task / Mission Framing** | ❌ Raw dump | ❌ None | ❌ None | ✅ `--task bugfix\|review\|refactor` |
+| **Execution Latency** | 6.04s (Node) / 1.56s (Py) | 1.32s | 2.70s | ✅ **1.21s (Fastest)** |
 | **Runtime Requirement** | ⚠️ Node.js / NPM (`npx`) | Python | Python | ✅ **Zero-Node Pure Python** (`pip`, `uvx`) |
 
 ---
@@ -166,12 +168,12 @@ By default, `focuspack` generates semantic XML structured for Anthropic Claude 3
 
 ---
 
-## 🛡️ Secret & Credential Scanning
+## 🛡️ In-Place Secret & Credential Scanning
 
-`focuspack` automatically scans and redacts sensitive credentials before code is packaged or copied:
+Unlike flat dumpers that either leak plaintext credentials or destructively drop entire source files (breaking imports and missing critical logic), `focuspack` automatically scans and performs **in-place redaction** (`[REDACTED_SECRET: ...]`), preserving your code's syntactic structure, function signatures, and imports:
 - **API Keys & Tokens:** OpenAI (`sk-...`), Anthropic (`sk-ant-...`), GitHub tokens (`ghp_...`, `github_pat_...`), Slack tokens.
 - **Cloud Credentials:** AWS Access Keys (`AKIA...`), AWS Secret Keys.
-- **Database Connection Strings:** Complete password redaction across `postgres://`, `mysql://`, `mongodb://`, `redis://`, and `mssql://` URLs.
+- **Database Connection Strings:** Complete password redaction across `postgres://`, `mysql://`, `mongodb://`, `redis://`, and `mssql://` URLs (preserving host and port for context).
 - **Private Keys:** RSA, SSH, and generic PEM private keys.
 
 ---
@@ -240,6 +242,58 @@ Creates `.focuspack.json`:
   "redact_secrets": true,
   "include_tree": true
 }
+```
+
+---
+
+## 🐍 Programmatic Python API
+
+`focuspack` is completely embeddable into autonomous agents (LangChain, LlamaIndex, AutoGen, CrewAI), FastAPI backends, or custom developer scripts:
+
+```python
+from focuspack.analyzer import Analyzer
+from focuspack.collector import Collector
+from focuspack.config import FocusPackConfig
+from focuspack.formatter import Formatter
+
+# 1. Configure focus target, depth, and token budget
+config = FocusPackConfig(
+    root_path=".",
+    focus_targets=["services/payment_service.py"],
+    focus_depth=1,
+    token_budget=8000,
+    output_format="xml",
+    task_template="bugfix",
+)
+
+# 2. Collect files and build AST dependency graph
+collector = Collector(config)
+files = collector.collect()
+stats = Analyzer.compute_stats(files)
+file_tree = collector.build_file_tree(files)
+
+# 3. Format into Claude / LLM-optimized context XML
+context_xml = Formatter.format_all(
+    files=files,
+    stats=stats,
+    file_tree=file_tree,
+    fmt=config.output_format,
+    budget_report=collector.budget_report,
+    task_prompt=config.task_template,
+)
+
+print(context_xml)
+```
+
+---
+
+## 🔬 Empirical Benchmark & Reproducibility
+
+An automated reproducibility suite is included in [`scripts/benchmark.py`](scripts/benchmark.py) to independently verify token budget enforcement, target preservation, and contract pruning across real repositories (`requests`, `click`, `flask`):
+
+```bash
+# Run the empirical benchmark suite (requires tiktoken)
+python scripts/benchmark.py
 ```
 
 ---
