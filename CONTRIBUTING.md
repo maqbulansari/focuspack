@@ -55,6 +55,17 @@ ruff format .
 
 ---
 
+## 🎯 Product Charter & Scope (Before You Write Code)
+
+Before proposing a feature or drafting a major PR, please review our **[Product Charter (CHARTER.md)](CHARTER.md)**.
+
+`focuspack` maintains a strict, disciplined scope centered around **Focus Target Inviolability**, **AST Dependency Contracts**, and **Adaptive Token Budgeting**. 
+
+- **We enthusiastically welcome:** Language parser enhancements, deeper AST contract analyzers, faster graph traversal, token calibration, and packaging format optimizations.
+- **We politely decline:** Flat monolithic dumpers, vector databases/RAG, cloud services, web UIs, and heavy non-Python dependencies (Node.js/npm, heavy C++ build tools).
+
+---
+
 ## 🚀 Submitting a Pull Request
 
 1. **Create a topic branch:**

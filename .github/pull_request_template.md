@@ -8,6 +8,13 @@ Briefly describe the change and why it was made.
 - [ ] 📚 Documentation update
 - [ ] ⚡ Performance improvement / code refactor
 
+## 🎯 Goal Alignment Verification (See [CHARTER.md](../CHARTER.md))
+Before opening this PR, verify alignment with `focuspack`'s core mission:
+- [ ] **Strengthens Core Pillars:** This PR directly improves Focus Target Retention, AST Dependency Contracts, Adaptive Token Budgeting, or Pure-Python Portability.
+- [ ] **Respects Non-Goals:** This PR does NOT introduce any Non-Goals (no vector DBs/RAG, no cloud APIs, no Web UIs, no flat monolithic dumping, no brittle regex line-parsers).
+- [ ] **Target Inviolability:** Focus target files are preserved or adaptively tiered—never silently omitted or truncated.
+- [ ] **Zero-Node Runtime:** No Node.js/npm or heavy native C++ build toolchains were introduced.
+
 ## Checklist
 - [ ] My code follows the style guidelines of this project
 - [ ] I have performed a self-review of my own code

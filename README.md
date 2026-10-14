@@ -11,7 +11,7 @@
 
 *Don't dump blindly. Pack the exact slice of code your LLM needs with AST contracts, semantic roles, and adaptive token budgets.*
 
-[Quick Start](#-quick-start) • [Why focuspack?](#-why-focuspack) • [How Budgeting Works](#-adaptive-multi-stage-budget-engine) • [Comparison](#-competitive-comparison) • [CLI Reference](#-cli-reference) • [Contributing](#-contributing)
+[Quick Start](#-quick-start) • [Why focuspack?](#-why-focuspack) • [How Budgeting Works](#-adaptive-multi-stage-budget-engine) • [Comparison](#-competitive-comparison) • [CLI Reference](#-cli-reference) • [Product Charter](CHARTER.md) • [Contributing](#-contributing)
 
 ---
 
@@ -238,13 +238,14 @@ Creates `.focuspack.json`:
 ## 🤝 Contributing
 
 Contributions, issues, and feature requests are welcome!
-See [CONTRIBUTING.md](CONTRIBUTING.md) for local dev setup and guidelines.
+Please review our **[Product Charter (CHARTER.md)](CHARTER.md)** to ensure proposals align with our core mission, and see [CONTRIBUTING.md](CONTRIBUTING.md) for local dev setup.
 
 1. Fork the repo & clone locally
 2. Create your branch (`git checkout -b feature/awesome-feature`)
 3. Install dependencies (`pip install -e ".[dev,all]"`)
 4. Run tests (`pytest`)
-5. Open a Pull Request
+5. Open a Pull Request verifying alignment with the Charter
+
 
 ---
 
