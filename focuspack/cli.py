@@ -96,7 +96,26 @@ def render_summary_panel(stats, collector: Collector, output_dest: str = ""):
     console.print(panel)
 
 
-@click.group(invoke_without_command=True)
+class DefaultGroup(click.Group):
+    """
+    Click Group that treats options or unknown subcommands as arguments
+    to the default 'pack' command, allowing 'focuspack -F file.py' directly.
+    """
+
+    def __init__(self, *args, **kwargs):
+        self.default_cmd_name = kwargs.pop("default_cmd_name", "pack")
+        super().__init__(*args, **kwargs)
+
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        if not args:
+            return super().parse_args(ctx, args)
+        first = args[0]
+        if first not in self.commands and first not in ("-h", "--help", "-v", "--version"):
+            args.insert(0, self.default_cmd_name)
+        return super().parse_args(ctx, args)
+
+
+@click.group(cls=DefaultGroup, default_cmd_name="pack", invoke_without_command=True)
 @click.option("--version", "-v", is_flag=True, help="Show version and exit.")
 @click.pass_context
 def cli(ctx: click.Context, version: bool):
@@ -314,6 +333,30 @@ def pack(
         budget_report=collector.budget_report,
         task_prompt=task,
     )
+
+    # Re-verify and lock exact rendered tokens count against output_text
+    real_tokens = Analyzer.estimate_tokens(output_text)
+    if collector.budget_report:
+        collector.budget_report.final_tokens = real_tokens
+        collector.budget_report.is_within_budget = (
+            real_tokens <= collector.budget_report.total_budget
+        )
+        collector.budget_report.utilization_pct = (
+            (real_tokens / collector.budget_report.total_budget) * 100
+            if collector.budget_report.total_budget
+            else 0.0
+        )
+        stats.total_tokens = real_tokens
+        # Refresh output_text so manifest tokens_used matches real_tokens to the exact digit
+        output_text = Formatter.format_all(
+            files=files,
+            stats=stats,
+            file_tree=file_tree,
+            fmt=format.lower(),
+            include_tree=tree,
+            budget_report=collector.budget_report,
+            task_prompt=task,
+        )
 
     # Budget compliance verification
     if collector.budget_report and not collector.budget_report.is_within_budget:

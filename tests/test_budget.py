@@ -80,3 +80,24 @@ def test_budget_optimizer_compresses_large_focus_target():
     assert "..." in target_res.content
     assert "Keep docstring." in target_res.content
     assert target_res.token_count < report.initial_tokens
+
+
+def test_budget_optimizer_stage5_drops_lowest_ranked_contracts():
+    focus = make_file("focus.py", "import c1\ndef main(): pass", FileRole.FOCUS_TARGET)
+    c1 = make_file("c1.py", "def f1(): pass", FileRole.DEPENDENCY_CONTRACT)
+    c1.depth = 1
+    c2 = make_file("c2.py", "def f2(): pass\n" + ("x = 1\n" * 50), FileRole.DEPENDENCY_CONTRACT)
+    c2.depth = 2
+
+    files = [focus, c1, c2]
+
+    # Target budget fits focus + c1, but cannot fit c2
+    target_budget = focus.token_count + c1.token_count + 10
+    optimized, report = BudgetOptimizer.optimize(files, budget_tokens=target_budget)
+
+    kept_paths = [f.relative_path for f in optimized]
+    assert "focus.py" in kept_paths
+    assert "c1.py" in kept_paths
+    assert "c2.py" not in kept_paths
+    assert "c2.py" in report.dropped_contracts
+    assert report.is_within_budget

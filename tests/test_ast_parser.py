@@ -69,3 +69,24 @@ export function UserCard(props: UserProps) {
     assert "export interface UserProps" in skeleton
     assert "UserCard" in skeleton
     assert "const [state, setState]" not in skeleton
+
+
+def test_python_raw_docstring_preservation():
+    # click/utils.py edge case: Windows paths in raw docstrings
+    code = r'''
+def get_app_dir(app_name: str) -> str:
+    r"""Returns the config folder for the application.
+    Windows (roaming):
+      ``C:\Users\<user>\AppData\Roaming\Foo Bar``
+    Windows (not roaming):
+      ``C:\Users\<user>\AppData\Local\Foo Bar``
+    """
+    return "dir"
+'''
+    skeleton = ASTParser.extract_python_skeleton(code)
+    import ast
+    # Skeletons must be valid parseable Python without raising SyntaxError
+    tree = ast.parse(skeleton)
+    assert tree is not None
+    assert "C:\\Users\\<user>\\AppData" in skeleton or r"C:\Users\<user>\AppData" in skeleton
+    assert "r\"\"\"" in skeleton

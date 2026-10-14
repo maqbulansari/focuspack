@@ -39,10 +39,10 @@ How `focuspack` compares against flat dumpers and other context tools under cons
 | Capability | Flat Dumpers (Repomix) | codesurf | ctxeng | 🎯 focuspack |
 | :--- | :---: | :---: | :---: | :---: |
 | **Selection Model** | Flat / Dump All (globs) | Focus Path | Focus Path | **Focus-Driven Graph** (`-F`) |
-| **Dependency Awareness** | ❌ None | ⚠️ Path heuristic | ❌ None | ✅ **AST Import Graph (BFS)** |
+| **Dependency Awareness** | ❌ None | Import-edge graph | Query import expansion (None in `--files`) | ✅ **AST Import Graph (BFS)** |
 | **Target Preservation under Budget** | N/A (no budget fitting) | ❌ **Drops target file** at low budgets | ❌ **Truncates mid-line** | ✅ **Preserves target; compresses tiered** |
-| **Budget Enforcement** | ❌ Exit code 1 check only | Silent file omission | String slicing | ✅ **4-Stage Adaptive Optimizer** |
-| **AST Interface Skeletons** | Global `--compress` flag | Regex-based | ❌ None | ✅ **Python AST + JS/TS outline** |
+| **Budget Enforcement** | ❌ Exit code 1 check only | Silent file omission | String slicing | ✅ **5-Stage Adaptive Optimizer** (Full Rendered Count) |
+| **AST Interface Skeletons** | Global `--compress` flag | AST Signatures Only | ❌ None | ✅ **Python AST + JS/TS outline** |
 | **Semantic Role Tags** | ❌ `<file path="...">` | ❌ None | ❌ None | ✅ `<file role="focus_target\|dependency_contract">` |
 | **Task / Mission Framing** | ❌ Raw dump | ❌ None | ❌ None | ✅ `--task bugfix\|review\|refactor` |
 | **Runtime Requirement** | ⚠️ Node.js / NPM (`npx`) | Python | Python | ✅ **Zero-Node Pure Python** (`pip`, `uvx`) |
@@ -51,7 +51,7 @@ How `focuspack` compares against flat dumpers and other context tools under cons
 
 ## 🧠 Adaptive Multi-Stage Budget Engine
 
-When you supply `--budget <size>` (e.g. `--budget 8k` or `--budget 32k`), `focuspack` does **not** naively truncate text or silently drop your primary target. It executes a multi-stage optimization pipeline:
+When you supply `--budget <size>` (e.g. `--budget 8k` or `--budget 32k`), `focuspack` does **not** naively truncate text, omit the envelope, or silently drop your primary target. It optimizes the **entire rendered output** (manifest, tree, envelope tags, and code contents) across a 5-stage adaptive pipeline:
 
 ```
 [All Repo Files]
@@ -68,6 +68,9 @@ When you supply `--budget <size>` (e.g. `--budget 8k` or `--budget 32k`), `focus
        ▼  Stage 4: Target Method Body Compression (AST)
 [Focus Target (Signatures + Compressed Methods) + Contracts]
        │
+       ▼  Stage 5: Dependency Contract Pruning (Lowest-Ranked First)
+[Focus Target (Preserved) + Essential Contracts (Strict Fit)]
+       │
        ▼  (Optional: --strict-budget)
 [Guaranteed Fit or Non-Zero Exit Code]
 ```
@@ -76,7 +79,8 @@ When you supply `--budget <size>` (e.g. `--budget 8k` or `--budget 32k`), `focus
 2. **Stage 2 — Dependency Contract Skeletons:** Directly imported dependencies are converted into AST interface contracts. Method bodies are replaced with `...`, preserving class definitions, type hints, and docstrings.
 3. **Stage 3 — Clean AST Docstring Stripping:** If further reduction is required, contract docstrings are cleanly removed using an `ast.NodeTransformer` without corrupting code or leaving loose strings.
 4. **Stage 4 — Large Target Method Compression:** If the focus target alone exceeds the budget, verbose internal method bodies are compressed to `...` while preserving public interfaces, arguments, return types, and docstrings.
-5. **Strict Budget Mode (`--strict-budget`):** In CI/CD pipelines or automated workflows, `--strict-budget` guarantees an exit code `1` if even Stage 4 cannot satisfy the requested limit.
+5. **Stage 5 — Ranked Contract Dropping:** If tight budgets cannot be satisfied by compression alone, lowest-ranked dependency contracts (furthest in depth, least referenced) are pruned one-by-one until the full rendered output strictly fits the requested token limit—without ever sacrificing your focus target.
+6. **Strict Budget Mode (`--strict-budget`):** In CI/CD pipelines or automated workflows, `--strict-budget` guarantees an exit code `1` if even Stage 5 and aggressive target compression cannot satisfy the requested limit. Token counts evaluate the whole rendered payload (manifest, tree, envelope, and contents).
 
 ---
 
@@ -85,12 +89,17 @@ When you supply `--budget <size>` (e.g. `--budget 8k` or `--budget 32k`), `focus
 ### Installation
 
 ```bash
-# Install via pip
+# Recommended: Install with tiktoken for exact BPE cl100k token counts (Claude, GPT-4o, Gemini)
+pip install "focuspack[tiktoken]"
+
+# Standard install (includes calibrated fallback estimator)
 pip install focuspack
 
 # Or run instantly with uvx / pipx without installing
 uvx focuspack
 ```
+
+> **Note on Token Counting:** For production pipelines and strict budget gating, installing `focuspack[tiktoken]` ensures token measurements precisely match Anthropic Claude 3.5/3.7, OpenAI GPT-4o, and Gemini tokenizers.
 
 ### Common Workflows
 

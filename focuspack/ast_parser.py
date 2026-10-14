@@ -8,6 +8,42 @@ from __future__ import annotations
 
 import ast
 import re
+import warnings
+
+
+def _format_docstring(doc: str, indent: str = "", is_module: bool = False) -> list[str]:
+    """
+    Format docstring safely preserving raw string prefix for escape sequences.
+    Prevents SyntaxError or invalid escape sequence warnings on paths like C:\\Users.
+    """
+    if not doc:
+        return []
+    if "\\" in doc:
+        if is_module:
+            candidate = f'r"""\n{doc}\n"""'
+        else:
+            candidate = f'{indent}r"""{doc}"""'
+        try:
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=SyntaxWarning)
+                ast.parse(f"def _():\n    {candidate.strip()}\n")
+            return [candidate]
+        except Exception:
+            escaped = doc.replace("\\", "\\\\")
+            if '"""' in escaped:
+                escaped = escaped.replace('"""', r'\"\"\"')
+            if is_module:
+                return [f'"""\n{escaped}\n"""']
+            return [f'{indent}"""{escaped}"""']
+    else:
+        if '"""' in doc:
+            escaped = doc.replace('"""', r'\"\"\"')
+            if is_module:
+                return [f'"""\n{escaped}\n"""']
+            return [f'{indent}"""{escaped}"""']
+        if is_module:
+            return [f'"""\n{doc}\n"""']
+        return [f'{indent}"""{doc}"""']
 
 
 class ASTParser:
@@ -40,7 +76,9 @@ class ASTParser:
         Preserves imports, signatures, annotations, and code structure.
         """
         try:
-            tree = ast.parse(code)
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=SyntaxWarning)
+                tree = ast.parse(code)
         except Exception:
             return code
 
@@ -88,7 +126,9 @@ class ASTParser:
         preserving class definitions, signatures, parameter types, and docstrings.
         """
         try:
-            tree = ast.parse(code)
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=SyntaxWarning)
+                tree = ast.parse(code)
         except Exception:
             return code
 
@@ -135,7 +175,9 @@ class ASTParser:
         signatures, docstrings, and type annotations, with bodies replaced by '...'.
         """
         try:
-            tree = ast.parse(code)
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=SyntaxWarning)
+                tree = ast.parse(code)
         except Exception:
             return code
 
@@ -143,7 +185,8 @@ class ASTParser:
 
         mod_doc = ast.get_docstring(tree)
         if mod_doc:
-            lines.append(f'"""\n{mod_doc}\n"""\n')
+            lines.extend(_format_docstring(mod_doc, "", is_module=True))
+            lines.append("")
 
         def format_arg(arg: ast.arg) -> str:
             res = arg.arg
@@ -204,7 +247,7 @@ class ASTParser:
 
             doc = ast.get_docstring(node)
             if doc:
-                res.append(f'{indent}    """{doc}"""')
+                res.extend(_format_docstring(doc, f"{indent}    "))
             res.append(f"{indent}    ...")
             return res
 
@@ -220,7 +263,7 @@ class ASTParser:
             has_body = False
             inner_indent = indent + "    "
             if doc:
-                res.append(f'{inner_indent}"""{doc}"""')
+                res.extend(_format_docstring(doc, inner_indent))
                 has_body = True
 
             for item in node.body:

@@ -1,11 +1,13 @@
 """
 Adaptive token budgeting engine for focuspack.
 Dynamically tiers, contracts, and compresses code to fit strictly within the model's
-context window, with AST-level method body compression when targets exceed budget.
+context window, counting the complete rendered output (manifest, tree, envelope tags, and files),
+with AST-level method body compression and contract pruning when targets exceed budget.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -29,6 +31,7 @@ class BudgetReport:
     docstrings_stripped: list[str] = field(default_factory=list)
     methods_compressed: list[str] = field(default_factory=list)
     pruned_files: list[str] = field(default_factory=list)
+    dropped_contracts: list[str] = field(default_factory=list)
     is_within_budget: bool = True
 
     def summary(self) -> str:
@@ -37,9 +40,12 @@ class BudgetReport:
             if self.is_within_budget
             else "[bold red]OVER BUDGET[/bold red]"
         )
+        extra = ""
+        if self.dropped_contracts:
+            extra = f" | Dropped Contracts: {len(self.dropped_contracts)}"
         return (
             f"Budget: {self.total_budget:,} tokens | Used: {self.final_tokens:,} "
-            f"({self.utilization_pct:.1f}%) | Status: {status}"
+            f"({self.utilization_pct:.1f}%) | Status: {status}{extra}"
         )
 
 
@@ -51,11 +57,22 @@ class BudgetOptimizer:
         cls,
         files: list[CollectedFile],
         budget_tokens: int,
+        renderer: Callable[[list[CollectedFile], BudgetReport | None], str] | None = None,
     ) -> tuple[list[CollectedFile], BudgetReport]:
         """
         Adaptively tier and compress files so total token consumption fits budget_tokens.
+        Accurately accounts for full rendered output including manifest, tree, and envelope.
         """
-        initial_tokens = sum(f.token_count for f in files)
+
+        def measure_tokens(
+            f_list: list[CollectedFile], current_report: BudgetReport | None = None
+        ) -> int:
+            if renderer is not None:
+                rendered = renderer(f_list, current_report)
+                return Analyzer.estimate_tokens(rendered)
+            return sum(f.token_count for f in f_list)
+
+        initial_tokens = measure_tokens(files)
         report = BudgetReport(
             total_budget=budget_tokens,
             initial_tokens=initial_tokens,
@@ -77,8 +94,9 @@ class BudgetOptimizer:
             else:
                 kept_files.append(f)
 
-        current_files = kept_files if kept_files else current_files
-        curr_tokens = sum(f.token_count for f in current_files)
+        if kept_files:
+            current_files = kept_files
+        curr_tokens = measure_tokens(current_files, report)
         if curr_tokens <= budget_tokens:
             return cls._finalize_report(current_files, report, curr_tokens)
 
@@ -96,7 +114,7 @@ class BudgetOptimizer:
                 f.byte_size = len(f.content.encode("utf-8"))
                 report.downgraded_to_skeleton.append(f.relative_path)
 
-        curr_tokens = sum(f.token_count for f in current_files)
+        curr_tokens = measure_tokens(current_files, report)
         if curr_tokens <= budget_tokens:
             return cls._finalize_report(current_files, report, curr_tokens)
 
@@ -112,7 +130,7 @@ class BudgetOptimizer:
                     f.byte_size = len(f.content.encode("utf-8"))
                     report.docstrings_stripped.append(f.relative_path)
 
-        curr_tokens = sum(f.token_count for f in current_files)
+        curr_tokens = measure_tokens(current_files, report)
         if curr_tokens <= budget_tokens:
             return cls._finalize_report(current_files, report, curr_tokens)
 
@@ -128,18 +146,43 @@ class BudgetOptimizer:
                     f.byte_size = len(f.content.encode("utf-8"))
                     report.methods_compressed.append(f.relative_path)
 
-        curr_tokens = sum(f.token_count for f in current_files)
+        curr_tokens = measure_tokens(current_files, report)
         if curr_tokens <= budget_tokens:
             return cls._finalize_report(current_files, report, curr_tokens)
 
-        # STAGE 5: If still over budget, aggressively compress all non-focus methods to 0 bodies
-        for f in current_files:
-            if f.role != FileRole.FOCUS_TARGET and ASTParser.can_parse(f.relative_path):
-                f.content = ASTParser.extract_skeleton(f.content, f.relative_path)
-                f.content = ASTParser.strip_docstrings_python(f.content)
-                f.token_count = Analyzer.estimate_tokens(f.content)
+        # STAGE 5: Drop lowest-ranked DEPENDENCY_CONTRACT files to satisfy tight budgets
+        # Drop order: highest depth (furthest from focus target), fewest times imported, largest token size
+        while curr_tokens > budget_tokens:
+            contracts = [f for f in current_files if f.role == FileRole.DEPENDENCY_CONTRACT]
+            if not contracts:
+                break
+            contracts.sort(
+                key=lambda c: (
+                    -getattr(c, "depth", 1),
+                    sum(1 for other in current_files if c.relative_path in other.imports),
+                    -c.token_count,
+                    c.relative_path,
+                )
+            )
+            to_drop = contracts[0]
+            current_files.remove(to_drop)
+            report.dropped_contracts.append(to_drop.relative_path)
+            curr_tokens = measure_tokens(current_files, report)
 
-        curr_tokens = sum(f.token_count for f in current_files)
+        if curr_tokens <= budget_tokens:
+            return cls._finalize_report(current_files, report, curr_tokens)
+
+        # STAGE 6: If still over budget, aggressively compress all focus target methods
+        for f in current_files:
+            if f.role == FileRole.FOCUS_TARGET and f.relative_path.endswith(".py"):
+                compressed = ASTParser.compress_large_methods_python(f.content, min_lines=5)
+                if len(compressed) < len(f.content):
+                    f.content = compressed
+                    f.token_count = Analyzer.estimate_tokens(f.content)
+                    f.line_count = len(f.content.splitlines())
+                    f.byte_size = len(f.content.encode("utf-8"))
+
+        curr_tokens = measure_tokens(current_files, report)
         return cls._finalize_report(current_files, report, curr_tokens)
 
     @classmethod

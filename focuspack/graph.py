@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import re
+import warnings
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -30,6 +31,7 @@ class NodeMetadata:
     role: FileRole = FileRole.PERIPHERAL
     imports: set[str] = field(default_factory=set)  # Relative paths of files this node imports
     imported_by: set[str] = field(default_factory=set)  # Files that import this node
+    depth: int = 999
 
 
 def clean_relative_path(path_str: str) -> str:
@@ -166,7 +168,9 @@ class DependencyGraph:
         try:
             with open(node.absolute_path, encoding="utf-8", errors="replace") as f:
                 code = f.read()
-            tree = ast.parse(code)
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=SyntaxWarning)
+                tree = ast.parse(code)
         except Exception:
             return
 
@@ -218,6 +222,9 @@ class DependencyGraph:
         Cycle-safe BFS traversal up to max_depth.
         """
         roles: dict[str, FileRole] = {p: FileRole.PERIPHERAL for p in self.nodes}
+        for node in self.nodes.values():
+            node.role = FileRole.PERIPHERAL
+            node.depth = 999
 
         focus_set: set[str] = set()
         for target in focus_targets:
@@ -227,12 +234,13 @@ class DependencyGraph:
                     focus_set.add(p)
                     roles[p] = FileRole.FOCUS_TARGET
                     self.nodes[p].role = FileRole.FOCUS_TARGET
+                    self.nodes[p].depth = 0
 
         # Cycle-safe BFS traversal
         current_frontier = set(focus_set)
         visited = set(focus_set)
 
-        for _ in range(max_depth):
+        for d in range(1, max_depth + 1):
             next_frontier = set()
             for p in current_frontier:
                 if p in self.nodes:
@@ -242,6 +250,7 @@ class DependencyGraph:
                             if roles.get(dep) != FileRole.FOCUS_TARGET:
                                 roles[dep] = FileRole.DEPENDENCY_CONTRACT
                                 self.nodes[dep].role = FileRole.DEPENDENCY_CONTRACT
+                                self.nodes[dep].depth = d
                                 next_frontier.add(dep)
             current_frontier = next_frontier
 

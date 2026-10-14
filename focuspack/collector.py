@@ -44,6 +44,7 @@ class CollectedFile:
     secrets_redacted: int = 0
     imports: list[str] = field(default_factory=list)
     imported_by: list[str] = field(default_factory=list)
+    depth: int = 0
 
 
 def clean_relative_path(path_str: str) -> str:
@@ -164,8 +165,33 @@ class Collector:
         """Ensure all requested focus targets match at least one file in the repository."""
         for target in targets:
             clean = clean_relative_path(target).rstrip("/")
+            target_path = Path(target)
+            rel_from_root = None
+            if target_path.is_absolute():
+                try:
+                    rel_from_root = clean_relative_path(
+                        target_path.resolve().relative_to(self.root_path).as_posix()
+                    )
+                except ValueError:
+                    pass
+            else:
+                try:
+                    resolved_cwd = (Path.cwd() / target).resolve()
+                    rel_from_root = clean_relative_path(
+                        resolved_cwd.relative_to(self.root_path).as_posix()
+                    )
+                except ValueError:
+                    pass
+
+            candidates = {clean}
+            if rel_from_root:
+                candidates.add(rel_from_root)
+
             matched = any(
-                p == clean or p.startswith(f"{clean}/") or p.endswith(f"/{clean}") or clean in p
+                any(
+                    p == c or p.startswith(f"{c}/") or p.endswith(f"/{c}") or c in p
+                    for c in candidates
+                )
                 for p in self.graph.nodes
             )
             if not matched:
@@ -283,6 +309,7 @@ class Collector:
             node = self.graph.nodes.get(rel_path)
             imports_list = sorted(node.imports) if node else []
             imported_by_list = sorted(node.imported_by) if node else []
+            depth_val = node.depth if node else 0
 
             collected.append(
                 CollectedFile(
@@ -298,6 +325,7 @@ class Collector:
                     secrets_redacted=secrets_count,
                     imports=imports_list,
                     imported_by=imported_by_list,
+                    depth=depth_val,
                 )
             )
 
@@ -313,8 +341,25 @@ class Collector:
 
         # Step 5: Adaptive Token Budgeting
         if self.config.token_budget and self.config.token_budget > 0:
+            from focuspack.formatter import Formatter
+
+            def measure_renderer(
+                file_list: list[CollectedFile], rep: BudgetReport | None = None
+            ) -> str:
+                s = Analyzer.compute_stats(file_list)
+                tree_str = self.build_file_tree(file_list)
+                return Formatter.format_all(
+                    files=file_list,
+                    stats=s,
+                    file_tree=tree_str,
+                    fmt=self.config.output_format,
+                    include_tree=self.config.include_tree,
+                    budget_report=rep,
+                    task_prompt=self.config.task_template,
+                )
+
             collected, self.budget_report = BudgetOptimizer.optimize(
-                collected, self.config.token_budget
+                collected, self.config.token_budget, renderer=measure_renderer
             )
 
         return collected
@@ -325,7 +370,7 @@ class Collector:
         if not self.graph.nodes:
             return "(No files found)\n"
 
-        file_roles = {rel_path: node.role for rel_path, node in self.graph.nodes.items()}
+        file_roles = {f.relative_path: f.role for f in files}
 
         tree: dict = {}
         for rel_path in self.graph.nodes:

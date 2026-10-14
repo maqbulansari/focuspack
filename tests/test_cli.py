@@ -95,3 +95,29 @@ def test_cli_nonexistent_focus_error(tmp_path: Path):
     )
     assert result.exit_code == 1
     assert "ghost_file.py" in result.output
+
+
+def test_cli_root_focuspack_direct_options(tmp_path: Path):
+    (tmp_path / "main.py").write_text("x = 42\n", encoding="utf-8")
+    runner = CliRunner()
+    # Invoke without explicit 'pack' command e.g. focuspack -F main.py
+    result = runner.invoke(
+        cli,
+        [str(tmp_path), "-F", "main.py", "--stdout"],
+    )
+    assert result.exit_code == 0
+    assert 'path="main.py"' in result.output
+    assert "x = 42" in result.output
+
+
+def test_cli_strict_budget_counts_whole_rendered_output(tmp_path: Path):
+    (tmp_path / "small.py").write_text("a = 1\n", encoding="utf-8")
+    runner = CliRunner()
+    # The file body is ~2 tokens, but whole rendered XML envelope + tree is ~40 tokens.
+    # A budget of 10 tokens must fail under --strict-budget because the full rendered output exceeds it.
+    result = runner.invoke(
+        cli,
+        ["pack", str(tmp_path), "--budget", "10", "--strict-budget"],
+    )
+    assert result.exit_code == 1
+    assert "strict-budget violation" in result.output
