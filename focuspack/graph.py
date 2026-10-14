@@ -1,7 +1,7 @@
 """
 Dependency graph and focus resolution engine for focuspack.
-Traverses import graphs using Python AST to separate active focus targets from
-contract dependencies and peripheral code.
+Traverses import graphs using Python AST to link focus targets with their
+contract dependencies, supporting submodules, relative imports, and src/ layouts.
 """
 
 from __future__ import annotations
@@ -32,21 +32,38 @@ class NodeMetadata:
     imported_by: set[str] = field(default_factory=set)  # Files that import this node
 
 
+def clean_relative_path(path_str: str) -> str:
+    """Normalize path separators and safely strip leading './' without touching leading dots."""
+    p = path_str.replace("\\", "/")
+    while p.startswith("./"):
+        p = p[2:]
+    return p
+
+
 class DependencyGraph:
     """Builds and queries the repository's import dependency graph."""
 
     def __init__(self, root_path: Path):
         self.root_path = root_path.resolve()
         self.nodes: dict[str, NodeMetadata] = {}
+        self._package_roots: list[str] = ["", "src"]
 
     def add_file(self, relative_path: str, absolute_path: Path):
         """Register a file node into the graph."""
-        norm_path = relative_path.replace("\\", "/")
+        norm_path = clean_relative_path(relative_path)
         if norm_path not in self.nodes:
             self.nodes[norm_path] = NodeMetadata(
                 relative_path=norm_path,
                 absolute_path=absolute_path,
             )
+            # Detect package roots like src/ or custom dirs
+            parts = norm_path.split("/")
+            if (
+                len(parts) > 1
+                and parts[0] not in self._package_roots
+                and parts[0] not in {".", "tests", "docs"}
+            ):
+                self._package_roots.append(parts[0])
 
     def build_graph(self):
         """Parse all registered files to extract imports and link dependencies."""
@@ -56,46 +73,93 @@ class DependencyGraph:
             elif node.absolute_path.suffix.lower() in {".ts", ".tsx", ".js", ".jsx"}:
                 self._parse_js_ts_imports(rel_path, node)
 
-    def _resolve_python_module(
-        self, current_rel_path: str, module_name: str | None, level: int = 0
-    ) -> str | None:
-        """Resolve a Python import to a registered file path in the repository."""
+    def _match_candidate(self, candidate_path: str) -> str | None:
+        """Check if candidate path exists in registered nodes."""
+        clean = clean_relative_path(candidate_path)
+        if clean in self.nodes:
+            return clean
+        for ext in [".py", "/__init__.py"]:
+            with_ext = f"{clean}{ext}"
+            if with_ext in self.nodes:
+                return with_ext
+        return None
+
+    def _resolve_python_import(
+        self,
+        current_rel_path: str,
+        module_name: str | None,
+        alias_name: str | None = None,
+        level: int = 0,
+    ) -> list[str]:
+        """
+        Resolve Python import statement to registered file path(s).
+        Handles:
+          - from . import models
+          - from app.core import store
+          - from app import cyc_b
+          - import requests.models
+        """
+        resolved: list[str] = []
         curr_dir = Path(current_rel_path).parent
 
-        # 1. Handle relative import (level > 0)
+        # 1. Relative Import (level > 0)
         if level > 0:
             target_dir = curr_dir
             for _ in range(level - 1):
                 target_dir = target_dir.parent
 
+            base_dir_posix = target_dir.as_posix()
+            if base_dir_posix == ".":
+                base_dir_posix = ""
+
+            candidates: list[str] = []
             if module_name:
-                mod_rel = (target_dir / module_name.replace(".", "/")).as_posix()
+                mod_sub = module_name.replace(".", "/")
+                prefix = f"{base_dir_posix}/{mod_sub}" if base_dir_posix else mod_sub
+                # Check submodule with alias e.g. from .pkg import submod
+                if alias_name:
+                    candidates.append(f"{prefix}/{alias_name}")
+                candidates.append(prefix)
             else:
-                mod_rel = target_dir.as_posix()
+                # from . import models
+                if alias_name:
+                    prefix = f"{base_dir_posix}/{alias_name}" if base_dir_posix else alias_name
+                    candidates.append(prefix)
+                if base_dir_posix:
+                    candidates.append(base_dir_posix)
 
-            for candidate in [f"{mod_rel}.py", f"{mod_rel}/__init__.py"]:
-                clean = candidate.lstrip("./").replace("//", "/")
-                if clean in self.nodes:
-                    return clean
-            return None
+            for cand in candidates:
+                matched = self._match_candidate(cand)
+                if matched and matched not in resolved:
+                    resolved.append(matched)
 
-        if not module_name:
-            return None
+            return resolved
 
-        # 2. Handle absolute module imports from repository root or current dir
-        mod_rel_path = module_name.replace(".", "/")
-        for prefix in ["", "src/"]:
-            for candidate in [
-                f"{prefix}{mod_rel_path}.py",
-                f"{prefix}{mod_rel_path}/__init__.py",
-                (curr_dir / f"{mod_rel_path}.py").as_posix(),
-                (curr_dir / f"{mod_rel_path}/__init__.py").as_posix(),
-            ]:
-                clean = candidate.lstrip("./").replace("//", "/")
-                if clean in self.nodes:
-                    return clean
+        # 2. Absolute Import (level == 0)
+        # Check against all detected package roots (e.g. root, src/, etc.)
+        search_roots = ["", "src"]
+        curr_dir_str = curr_dir.as_posix()
+        if curr_dir_str and curr_dir_str not in search_roots:
+            search_roots.append(curr_dir_str)
 
-        return None
+        candidates = []
+        if module_name:
+            mod_sub = module_name.replace(".", "/")
+            # Submodule via alias: from app.core import store -> app/core/store.py
+            if alias_name:
+                candidates.append(f"{mod_sub}/{alias_name}")
+            candidates.append(mod_sub)
+        elif alias_name:
+            candidates.append(alias_name)
+
+        for root in search_roots:
+            for cand in candidates:
+                full_cand = f"{root}/{cand}" if root else cand
+                matched = self._match_candidate(full_cand)
+                if matched and matched not in resolved:
+                    resolved.append(matched)
+
+        return resolved
 
     def _parse_python_imports(self, rel_path: str, node: NodeMetadata):
         """Extract imports from Python AST."""
@@ -109,15 +173,19 @@ class DependencyGraph:
         for ast_node in ast.walk(tree):
             if isinstance(ast_node, ast.Import):
                 for alias in ast_node.names:
-                    resolved = self._resolve_python_module(rel_path, alias.name, level=0)
-                    if resolved and resolved != rel_path:
-                        node.imports.add(resolved)
+                    # e.g. import requests.sessions
+                    for target in self._resolve_python_import(rel_path, alias.name, level=0):
+                        if target != rel_path:
+                            node.imports.add(target)
             elif isinstance(ast_node, ast.ImportFrom):
-                resolved = self._resolve_python_module(
-                    rel_path, ast_node.module, level=ast_node.level
-                )
-                if resolved and resolved != rel_path:
-                    node.imports.add(resolved)
+                # e.g. from . import models or from requests.models import Request
+                for alias in ast_node.names:
+                    targets = self._resolve_python_import(
+                        rel_path, ast_node.module, alias_name=alias.name, level=ast_node.level
+                    )
+                    for target in targets:
+                        if target != rel_path:
+                            node.imports.add(target)
 
         for dep in node.imports:
             if dep in self.nodes:
@@ -132,49 +200,49 @@ class DependencyGraph:
             return
 
         curr_dir = Path(rel_path).parent
-        # Matches import ... from './something' or require('./something')
         import_regex = re.compile(
             r"""(?:import\s+.*?from\s+['"]|require\(['"])([\.\/][^'"]+)['"]"""
         )
         for match in import_regex.finditer(code):
             raw_path = match.group(1)
-            # Resolve relative file
-            resolved_base = (curr_dir / raw_path).as_posix().lstrip("./")
-            for ext in ["", ".ts", ".tsx", ".js", ".jsx", "/index.ts", "/index.js"]:
-                candidate = f"{resolved_base}{ext}"
-                if candidate in self.nodes and candidate != rel_path:
-                    node.imports.add(candidate)
-                    self.nodes[candidate].imported_by.add(rel_path)
-                    break
+            resolved_base = clean_relative_path((curr_dir / raw_path).as_posix())
+            matched = self._match_candidate(resolved_base)
+            if matched and matched != rel_path:
+                node.imports.add(matched)
+                if matched in self.nodes:
+                    self.nodes[matched].imported_by.add(rel_path)
 
     def apply_focus(self, focus_targets: list[str], max_depth: int = 1) -> dict[str, FileRole]:
         """
         Given focus targets (files or directories), assign semantic roles across the repository.
-        Returns a mapping of relative_path -> FileRole.
+        Cycle-safe BFS traversal up to max_depth.
         """
         roles: dict[str, FileRole] = {p: FileRole.PERIPHERAL for p in self.nodes}
 
-        # 1. Identify primary focus targets
         focus_set: set[str] = set()
         for target in focus_targets:
-            target_norm = target.replace("\\", "/").rstrip("/")
+            target_norm = clean_relative_path(target).rstrip("/")
             for p in self.nodes:
                 if p == target_norm or p.startswith(f"{target_norm}/"):
                     focus_set.add(p)
                     roles[p] = FileRole.FOCUS_TARGET
                     self.nodes[p].role = FileRole.FOCUS_TARGET
 
-        # 2. Traverse dependency graph outward up to max_depth
+        # Cycle-safe BFS traversal
         current_frontier = set(focus_set)
+        visited = set(focus_set)
+
         for _ in range(max_depth):
             next_frontier = set()
             for p in current_frontier:
                 if p in self.nodes:
                     for dep in self.nodes[p].imports:
-                        if roles.get(dep) != FileRole.FOCUS_TARGET:
-                            roles[dep] = FileRole.DEPENDENCY_CONTRACT
-                            self.nodes[dep].role = FileRole.DEPENDENCY_CONTRACT
-                            next_frontier.add(dep)
+                        if dep not in visited:
+                            visited.add(dep)
+                            if roles.get(dep) != FileRole.FOCUS_TARGET:
+                                roles[dep] = FileRole.DEPENDENCY_CONTRACT
+                                self.nodes[dep].role = FileRole.DEPENDENCY_CONTRACT
+                                next_frontier.add(dep)
             current_frontier = next_frontier
 
         return roles

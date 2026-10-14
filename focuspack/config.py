@@ -73,10 +73,8 @@ DEFAULT_IGNORE_PATTERNS: list[str] = [
     "*.focuspack.md",
     "*.focuspack.xml",
     "*.focuspack.json",
-    "context.xml",
-    "context.md",
-    "digest.md",
-    "digest.xml",
+    "context.*",
+    "digest.*",
 ]
 
 # Known binary extensions
@@ -155,6 +153,12 @@ SECRET_PATTERNS: list[tuple[str, Pattern[str]]] = [
         ),
     ),
     (
+        "Database Credentials",
+        re.compile(
+            r"(?i)\b(?:postgres|postgresql|mysql|mongodb|mongodb\+srv|redis|rediss|amqp|mssql):\/\/[^\s:@/]+:([^\s@/]+)@[^\s/]+"
+        ),
+    ),
+    (
         "Slack Token",
         re.compile(r"\b(xox[baprs]-[0-9a-zA-Z]{10,48})\b"),
     ),
@@ -183,7 +187,11 @@ class FocusPackConfig:
     mode: str = "auto"  # auto (tiered), full, skeleton
     focus_targets: list[str] = field(default_factory=list)  # Files/directories of interest
     focus_depth: int = 1  # How many dependency hops to include
+    include_peripherals: bool = (
+        False  # If True, includes peripheral files in file contents even when focus is active
+    )
     token_budget: int | None = None  # e.g., 32000, 64000
+    strict_budget: bool = False  # If True, fail with error if budget cannot be met
     task_template: str | None = None  # e.g., "bugfix", "review", "refactor", "explain"
     custom_task_prompt: str | None = None
     max_file_size_bytes: int = 500 * 1024  # 500 KB limit

@@ -1,5 +1,5 @@
 """
-Security and secret scanning module for repodigest.
+Security and secret scanning module for focuspack.
 Prevents accidental leakage of API keys, tokens, and credentials into AI prompts.
 """
 

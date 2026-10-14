@@ -6,7 +6,6 @@ from focuspack.graph import DependencyGraph, FileRole
 
 
 def test_dependency_graph_traversal(tmp_path: Path):
-    # Setup mock repository with imports
     service_file = tmp_path / "service.py"
     client_file = tmp_path / "client.py"
     unrelated_file = tmp_path / "unrelated.py"
@@ -22,13 +21,86 @@ def test_dependency_graph_traversal(tmp_path: Path):
 
     graph.build_graph()
 
-    # service.py imports client.py
     assert "client.py" in graph.nodes["service.py"].imports
     assert "service.py" in graph.nodes["client.py"].imported_by
 
-    # Apply focus on service.py
     roles = graph.apply_focus(["service.py"], max_depth=1)
-
     assert roles["service.py"] == FileRole.FOCUS_TARGET
     assert roles["client.py"] == FileRole.DEPENDENCY_CONTRACT
     assert roles["unrelated.py"] == FileRole.PERIPHERAL
+
+
+def test_submodule_import_from_dot(tmp_path: Path):
+    # Tests: from . import models (common in requests/sessions.py)
+    pkg_dir = tmp_path / "mypkg"
+    pkg_dir.mkdir()
+    sessions_file = pkg_dir / "sessions.py"
+    models_file = pkg_dir / "models.py"
+    init_file = pkg_dir / "__init__.py"
+
+    sessions_file.write_text("from . import models\ndef run(): pass", encoding="utf-8")
+    models_file.write_text("class Request: pass", encoding="utf-8")
+    init_file.write_text("", encoding="utf-8")
+
+    graph = DependencyGraph(tmp_path)
+    graph.add_file("mypkg/sessions.py", sessions_file)
+    graph.add_file("mypkg/models.py", models_file)
+    graph.add_file("mypkg/__init__.py", init_file)
+
+    graph.build_graph()
+
+    # sessions.py must import models.py
+    assert "mypkg/models.py" in graph.nodes["mypkg/sessions.py"].imports
+    roles = graph.apply_focus(["mypkg/sessions.py"], max_depth=1)
+    assert roles["mypkg/sessions.py"] == FileRole.FOCUS_TARGET
+    assert roles["mypkg/models.py"] == FileRole.DEPENDENCY_CONTRACT
+
+
+def test_submodule_import_from_app_core(tmp_path: Path):
+    # Tests: from app.core import store
+    app_dir = tmp_path / "app" / "core"
+    app_dir.mkdir(parents=True)
+    main_file = tmp_path / "app" / "main.py"
+    store_file = app_dir / "store.py"
+    init_core = app_dir / "__init__.py"
+
+    main_file.write_text("from app.core import store\ndef run(): store.get()", encoding="utf-8")
+    store_file.write_text("def get(): pass", encoding="utf-8")
+    init_core.write_text("", encoding="utf-8")
+
+    graph = DependencyGraph(tmp_path)
+    graph.add_file("app/main.py", main_file)
+    graph.add_file("app/core/store.py", store_file)
+    graph.add_file("app/core/__init__.py", init_core)
+
+    graph.build_graph()
+
+    assert "app/core/store.py" in graph.nodes["app/main.py"].imports
+    roles = graph.apply_focus(["app/main.py"], max_depth=1)
+    assert roles["app/main.py"] == FileRole.FOCUS_TARGET
+    assert roles["app/core/store.py"] == FileRole.DEPENDENCY_CONTRACT
+
+
+def test_cyclic_import_traversal(tmp_path: Path):
+    # Tests: from app import cyc_b / cyc_a cycles
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    cyc_a = app_dir / "cyc_a.py"
+    cyc_b = app_dir / "cyc_b.py"
+
+    cyc_a.write_text("from app import cyc_b\ndef a(): pass", encoding="utf-8")
+    cyc_b.write_text("from app import cyc_a\ndef b(): pass", encoding="utf-8")
+
+    graph = DependencyGraph(tmp_path)
+    graph.add_file("app/cyc_a.py", cyc_a)
+    graph.add_file("app/cyc_b.py", cyc_b)
+
+    graph.build_graph()
+
+    assert "app/cyc_b.py" in graph.nodes["app/cyc_a.py"].imports
+    assert "app/cyc_a.py" in graph.nodes["app/cyc_b.py"].imports
+
+    # Safe traversal without infinite recursion
+    roles = graph.apply_focus(["app/cyc_a.py"], max_depth=2)
+    assert roles["app/cyc_a.py"] == FileRole.FOCUS_TARGET
+    assert roles["app/cyc_b.py"] == FileRole.DEPENDENCY_CONTRACT

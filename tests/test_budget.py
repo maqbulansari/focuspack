@@ -48,3 +48,35 @@ def test_budget_optimizer_downgrades_peripheral():
     focus_res = next(f for f in optimized if f.relative_path == "focus.py")
     assert focus_res.mode == "full"
     assert report.final_tokens <= initial_tokens
+
+
+def test_budget_optimizer_stage3_docstring_stripping():
+    # Contract with docstring
+    contract_code = 'def utility():\n    """This is a very long documentation docstring describing how this works."""\n    return 1\n'
+    focus = make_file("focus.py", "x = 1\n", FileRole.FOCUS_TARGET)
+    contract = make_file("contract.py", contract_code, FileRole.DEPENDENCY_CONTRACT)
+
+    # Force budget smaller than contract with docstring
+    budget = focus.token_count + 5
+    optimized, report = BudgetOptimizer.optimize([focus, contract], budget_tokens=budget)
+    contract_res = next(f for f in optimized if f.relative_path == "contract.py")
+    assert "docstrings describing how" not in contract_res.content
+
+
+def test_budget_optimizer_compresses_large_focus_target():
+    large_body = "\n".join([f"    x_{i} = {i}" for i in range(40)])
+    target_code = (
+        f"def massive_handler():\n    '''Keep docstring.'''\n{large_body}\n    return True\n"
+    )
+    target = make_file("target.py", target_code, FileRole.FOCUS_TARGET)
+
+    # Budget is smaller than target token count
+    tight_budget = target.token_count // 2
+    optimized, report = BudgetOptimizer.optimize([target], budget_tokens=tight_budget)
+
+    target_res = optimized[0]
+    assert target_res.mode == "compressed_target"
+    assert "target.py" in report.methods_compressed
+    assert "..." in target_res.content
+    assert "Keep docstring." in target_res.content
+    assert target_res.token_count < report.initial_tokens

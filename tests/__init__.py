@@ -1,1 +1,1 @@
-"""Tests for repodigest."""
+"""Tests for focuspack."""

@@ -1,5 +1,5 @@
 """
-AST & signature extraction module for repodigest.
+AST & signature extraction module for focuspack.
 Produces compressed skeleton outlines of files, reducing token usage by up to 80%
 while preserving full architectural, class, and method context for LLMs.
 """
@@ -34,6 +34,101 @@ class ASTParser:
         return content
 
     @classmethod
+    def strip_docstrings_python(cls, code: str) -> str:
+        """
+        Cleanly remove docstrings from Python AST without damaging multiline code.
+        Preserves imports, signatures, annotations, and code structure.
+        """
+        try:
+            tree = ast.parse(code)
+        except Exception:
+            return code
+
+        class DocstringStripper(ast.NodeTransformer):
+            def _strip(self, body_list):
+                if (
+                    body_list
+                    and isinstance(body_list[0], ast.Expr)
+                    and isinstance(body_list[0].value, ast.Constant)
+                    and isinstance(body_list[0].value.value, str)
+                ):
+                    body_list.pop(0)
+                    if not body_list:
+                        body_list.append(ast.Expr(value=ast.Constant(value=Ellipsis)))
+                return body_list
+
+            def visit_FunctionDef(self, node):
+                self.generic_visit(node)
+                node.body = self._strip(node.body)
+                return node
+
+            def visit_AsyncFunctionDef(self, node):
+                self.generic_visit(node)
+                node.body = self._strip(node.body)
+                return node
+
+            def visit_ClassDef(self, node):
+                self.generic_visit(node)
+                node.body = self._strip(node.body)
+                return node
+
+            def visit_Module(self, node):
+                self.generic_visit(node)
+                node.body = self._strip(node.body)
+                return node
+
+        stripped = DocstringStripper().visit(tree)
+        ast.fix_missing_locations(stripped)
+        return ast.unparse(stripped)
+
+    @classmethod
+    def compress_large_methods_python(cls, code: str, min_lines: int = 15) -> str:
+        """
+        Compress large internal function/method bodies in Python AST to '...',
+        preserving class definitions, signatures, parameter types, and docstrings.
+        """
+        try:
+            tree = ast.parse(code)
+        except Exception:
+            return code
+
+        class BodyCompressor(ast.NodeTransformer):
+            def visit_FunctionDef(self, node):
+                self.generic_visit(node)
+                # Check if body is large (more than min_lines statements)
+                if len(node.body) > 3 or (
+                    hasattr(node, "end_lineno")
+                    and hasattr(node, "lineno")
+                    and (node.end_lineno - node.lineno) > min_lines
+                ):
+                    doc = ast.get_docstring(node)
+                    new_body = []
+                    if doc:
+                        new_body.append(ast.Expr(value=ast.Constant(value=doc)))
+                    new_body.append(ast.Expr(value=ast.Constant(value=Ellipsis)))
+                    node.body = new_body
+                return node
+
+            def visit_AsyncFunctionDef(self, node):
+                self.generic_visit(node)
+                if len(node.body) > 3 or (
+                    hasattr(node, "end_lineno")
+                    and hasattr(node, "lineno")
+                    and (node.end_lineno - node.lineno) > min_lines
+                ):
+                    doc = ast.get_docstring(node)
+                    new_body = []
+                    if doc:
+                        new_body.append(ast.Expr(value=ast.Constant(value=doc)))
+                    new_body.append(ast.Expr(value=ast.Constant(value=Ellipsis)))
+                    node.body = new_body
+                return node
+
+        compressed = BodyCompressor().visit(tree)
+        ast.fix_missing_locations(compressed)
+        return ast.unparse(compressed)
+
+    @classmethod
     def extract_python_skeleton(cls, code: str) -> str:
         """
         Extract clean Python module outline containing imports, classes, methods,
@@ -42,11 +137,10 @@ class ASTParser:
         try:
             tree = ast.parse(code)
         except Exception:
-            return code  # Fallback to full code if syntax error
+            return code
 
         lines: list[str] = []
 
-        # Module docstring
         mod_doc = ast.get_docstring(tree)
         if mod_doc:
             lines.append(f'"""\n{mod_doc}\n"""\n')
@@ -59,14 +153,12 @@ class ASTParser:
 
         def format_arguments(args: ast.arguments) -> str:
             parts = []
-            # Positional only
             posonly_count = len(args.posonlyargs)
             for a in args.posonlyargs:
                 parts.append(format_arg(a))
             if posonly_count > 0:
                 parts.append("/")
 
-            # Standard positional
             default_offset = len(args.args) - len(args.defaults)
             for i, a in enumerate(args.args):
                 s = format_arg(a)
@@ -75,13 +167,11 @@ class ASTParser:
                     s += f" = {ast.unparse(args.defaults[default_idx])}"
                 parts.append(s)
 
-            # Vararg (*args)
             if args.vararg:
                 parts.append(f"*{format_arg(args.vararg)}")
             elif args.kwonlyargs:
                 parts.append("*")
 
-            # Keyword-only
             for i, a in enumerate(args.kwonlyargs):
                 s = format_arg(a)
                 default = args.kw_defaults[i]
@@ -89,7 +179,6 @@ class ASTParser:
                     s += f" = {ast.unparse(default)}"
                 parts.append(s)
 
-            # Kwarg (**kwargs)
             if args.kwarg:
                 parts.append(f"**{format_arg(args.kwarg)}")
 
@@ -181,18 +270,17 @@ class ASTParser:
         lines: list[str] = []
         for line in code.splitlines():
             stripped = line.strip()
-            # Imports / Exports / Type / Interface
             if stripped.startswith(
                 ("import ", "export type ", "export interface ", "interface ", "type ")
-            ) or re.match(r"^(export\s+)?(abstract\s+)?class\s+\w+", stripped):
+            ):
                 lines.append(line)
-            # Function declaration
+            elif re.match(r"^(export\s+)?(abstract\s+)?class\s+\w+", stripped):
+                lines.append(line)
             elif re.match(r"^(export\s+)?(async\s+)?function\s+\w+", stripped):
                 sig = re.sub(r"\{.*$", "{ ... }", line)
                 if not sig.endswith("}"):
                     sig += " { ... }"
                 lines.append(sig)
-            # Method or property signatures inside interfaces/types
             elif re.match(r"^\w+\??\(.*\)\s*:\s*.*", stripped) or re.match(
                 r"^\w+\??\s*:\s*.*", stripped
             ):
@@ -216,11 +304,9 @@ class ASTParser:
                 lines.append(line)
                 if stripped == ")":
                     in_import_block = False
-            elif (
-                stripped.startswith("import ")
-                or stripped.startswith("type ")
-                and ("struct" in stripped or "interface" in stripped)
-            ):
+            elif stripped.startswith("import "):
+                lines.append(line)
+            elif stripped.startswith("type ") and ("struct" in stripped or "interface" in stripped):
                 lines.append(line)
             elif stripped.startswith("func "):
                 sig = re.sub(r"\{.*$", "{ ... }", line)
@@ -236,9 +322,9 @@ class ASTParser:
         lines: list[str] = []
         for line in code.splitlines():
             stripped = line.strip()
-            if stripped.startswith("use ") or re.match(
-                r"^(pub\s+)?(struct|enum|trait)\s+\w+", stripped
-            ):
+            if stripped.startswith("use "):
+                lines.append(line)
+            elif re.match(r"^(pub\s+)?(struct|enum|trait)\s+\w+", stripped):
                 lines.append(line)
             elif re.match(r"^(pub\s+)?(async\s+)?fn\s+\w+", stripped):
                 sig = re.sub(r"\{.*$", "{ ... }", line)

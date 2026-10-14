@@ -39,11 +39,19 @@ class CollectedFile:
     line_count: int
     byte_size: int
     token_count: int
-    mode: str  # "full", "skeleton", "compact_contract"
+    mode: str  # "full", "skeleton", "compact_contract", "compressed_target"
     role: FileRole = FileRole.PERIPHERAL
     secrets_redacted: int = 0
     imports: list[str] = field(default_factory=list)
     imported_by: list[str] = field(default_factory=list)
+
+
+def clean_relative_path(path_str: str) -> str:
+    """Normalize path separators and safely strip leading './' without touching leading dots."""
+    p = path_str.replace("\\", "/")
+    while p.startswith("./"):
+        p = p[2:]
+    return p
 
 
 class Collector:
@@ -84,7 +92,7 @@ class Collector:
 
     def is_ignored(self, relative_path_str: str, is_dir: bool = False) -> bool:
         """Check if a path matches ignore patterns."""
-        norm_path = relative_path_str.replace("\\", "/")
+        norm_path = clean_relative_path(relative_path_str)
         if is_dir and not norm_path.endswith("/"):
             norm_path += "/"
 
@@ -125,7 +133,7 @@ class Collector:
         if not self.config.include_patterns:
             return True
 
-        norm_path = relative_path_str.replace("\\", "/")
+        norm_path = clean_relative_path(relative_path_str)
         for pat in self.config.include_patterns:
             if Path(norm_path).match(pat) or pat in norm_path:
                 return True
@@ -147,10 +155,23 @@ class Collector:
                     raw_file = line[3:].strip()
                     if " -> " in raw_file:
                         raw_file = raw_file.split(" -> ")[1].strip()
-                    files.add(raw_file.replace("\\", "/"))
+                    files.add(clean_relative_path(raw_file))
             return files
         except Exception:
             return None
+
+    def validate_focus_targets(self, targets: list[str]):
+        """Ensure all requested focus targets match at least one file in the repository."""
+        for target in targets:
+            clean = clean_relative_path(target).rstrip("/")
+            matched = any(
+                p == clean or p.startswith(f"{clean}/") or p.endswith(f"/{clean}") or clean in p
+                for p in self.graph.nodes
+            )
+            if not matched:
+                raise FileNotFoundError(
+                    f"Focus target '{target}' does not match any file or directory in the repository."
+                )
 
     def collect(self, git_diff_only: bool = False) -> list[CollectedFile]:
         """Scan directory, build dependency graph, apply focus roles, and enforce budget."""
@@ -161,16 +182,18 @@ class Collector:
         if git_diff_only:
             filter_files = self.get_git_modified_files()
 
-        # Step 1: Discover valid files and populate dependency graph
+        # Step 1: Discover valid files and register nodes in graph
         discovered_paths: list[tuple[str, Path]] = []
         for dirpath, dirnames, filenames in os.walk(self.root_path):
             current_dir = Path(dirpath)
             rel_dir = current_dir.relative_to(self.root_path).as_posix()
+            if rel_dir == ".":
+                rel_dir = ""
 
             dirnames[:] = [
                 d
                 for d in dirnames
-                if not self.is_ignored(f"{rel_dir}/{d}" if rel_dir != "." else d, is_dir=True)
+                if not self.is_ignored(f"{rel_dir}/{d}" if rel_dir else d, is_dir=True)
             ]
 
             for fname in filenames:
@@ -200,18 +223,24 @@ class Collector:
 
         # Step 3: Apply focus resolution
         active_focus = list(self.config.focus_targets)
-        # If git_diff_only is active, treat git modified files as automatic focus targets!
         if git_diff_only and filter_files:
             active_focus.extend(filter_files)
 
-        roles_map = (
-            self.graph.apply_focus(active_focus, max_depth=self.config.focus_depth)
-            if active_focus
-            else {}
-        )
+        if active_focus:
+            self.validate_focus_targets(active_focus)
+            roles_map = self.graph.apply_focus(active_focus, max_depth=self.config.focus_depth)
+        else:
+            roles_map = {}
 
         # Step 4: Load and process content
         for rel_path, file_path in discovered_paths:
+            role = roles_map.get(rel_path, FileRole.PERIPHERAL)
+
+            # CRITICAL FIX: When focus targets are specified, exclude peripheral files
+            # (unrelated modules, README, LICENSE, CI files) from content payload by default!
+            if active_focus and role == FileRole.PERIPHERAL and not self.config.include_peripherals:
+                continue
+
             try:
                 with open(file_path, encoding="utf-8", errors="replace") as f:
                     raw_text = f.read()
@@ -227,8 +256,6 @@ class Collector:
             if self.config.redact_secrets and scanned_findings:
                 processed_content, secrets_count = self.scanner.redact_text(raw_text)
 
-            role = roles_map.get(rel_path, FileRole.PERIPHERAL)
-
             # Determine mode based on role & config
             mode_used = "full"
             if self.config.mode == "skeleton" and ASTParser.can_parse(rel_path):
@@ -241,7 +268,6 @@ class Collector:
                         processed_content = ASTParser.extract_skeleton(processed_content, rel_path)
                         mode_used = "skeleton"
                     elif role == FileRole.PERIPHERAL and ASTParser.can_parse(rel_path):
-                        # Peripherals are skeletons
                         processed_content = ASTParser.extract_skeleton(processed_content, rel_path)
                         mode_used = "skeleton"
                 else:
@@ -295,18 +321,19 @@ class Collector:
 
     def build_file_tree(self, files: list[CollectedFile]) -> str:
         """Generate clean ASCII tree representation with semantic role markers."""
-        if not files:
+        # Use graph nodes so the full architecture is visible even if peripheral contents are pruned
+        if not self.graph.nodes:
             return "(No files found)\n"
 
-        file_roles = {f.relative_path: f.role for f in files}
+        file_roles = {rel_path: node.role for rel_path, node in self.graph.nodes.items()}
 
         tree: dict = {}
-        for f in files:
-            parts = f.relative_path.split("/")
+        for rel_path in self.graph.nodes:
+            parts = rel_path.split("/")
             curr = tree
             for part in parts[:-1]:
                 curr = curr.setdefault(part, {})
-            curr[parts[-1]] = f.relative_path
+            curr[parts[-1]] = rel_path
 
         lines = [f"{self.root_path.name}/"]
 

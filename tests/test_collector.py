@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from focuspack.collector import Collector
 from focuspack.config import FocusPackConfig
 
@@ -64,3 +66,44 @@ def test_collector_file_tree(tmp_path: Path):
 
     assert "pkg/" in tree
     assert "a.py" in tree
+
+
+def test_collector_focus_excludes_peripherals(tmp_path: Path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "utils.py").write_text("def helper():\n    return 42\n", encoding="utf-8")
+    (src / "main.py").write_text("from .utils import helper\nhelper()\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text("# Docs", encoding="utf-8")
+    (tmp_path / "unrelated.py").write_text("x = 100", encoding="utf-8")
+
+    # Focus on main.py without including peripherals:
+    # Only main.py (focus target) and utils.py (dependency contract) should be collected.
+    cfg_focus = FocusPackConfig(root_path=str(tmp_path), focus_targets=["src/main.py"])
+    collector = Collector(cfg_focus)
+    files = collector.collect()
+    paths = [f.relative_path for f in files]
+
+    assert "src/main.py" in paths
+    assert "src/utils.py" in paths
+    assert "README.md" not in paths
+    assert "unrelated.py" not in paths
+
+    # With include_peripherals=True, everything should be included
+    cfg_all = FocusPackConfig(
+        root_path=str(tmp_path),
+        focus_targets=["src/main.py"],
+        include_peripherals=True,
+    )
+    collector_all = Collector(cfg_all)
+    files_all = collector_all.collect()
+    paths_all = [f.relative_path for f in files_all]
+    assert "README.md" in paths_all
+    assert "unrelated.py" in paths_all
+
+
+def test_collector_nonexistent_focus_target_raises(tmp_path: Path):
+    (tmp_path / "main.py").write_text("x = 1", encoding="utf-8")
+    cfg = FocusPackConfig(root_path=str(tmp_path), focus_targets=["nonexistent_file.py"])
+    collector = Collector(cfg)
+    with pytest.raises(FileNotFoundError, match="does not match any file"):
+        collector.collect()

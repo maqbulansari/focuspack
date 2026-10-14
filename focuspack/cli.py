@@ -1,6 +1,6 @@
 """
 Command Line Interface for focuspack.
-Powered by Click and Rich for an exceptional developer experience.
+Focus-driven, budget-aware codebase context packager for LLMs.
 """
 
 from __future__ import annotations
@@ -21,6 +21,18 @@ from focuspack.collector import Collector
 from focuspack.config import FocusPackConfig
 from focuspack.formatter import Formatter
 from focuspack.graph import FileRole
+
+# Ensure UTF-8 output on Windows consoles to prevent UnicodeEncodeError with tree box characters
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 console = Console()
 err_console = Console(stderr=True)
@@ -61,7 +73,7 @@ def render_summary_panel(stats, collector: Collector, output_dest: str = ""):
     # Budget info
     if collector.budget_report:
         report = collector.budget_report
-        b_color = "green" if report.is_within_budget else "yellow"
+        b_color = "green" if report.is_within_budget else "bold red"
         table.add_row(
             "Token Budget",
             f"[{b_color}]{report.final_tokens:,} / {report.total_budget:,} ({report.utilization_pct:.1f}%)[/{b_color}]",
@@ -77,7 +89,9 @@ def render_summary_panel(stats, collector: Collector, output_dest: str = ""):
         table,
         title=f"[bold green]focuspack v{__version__}[/bold green]",
         subtitle="[dim]Focus-Driven LLM Context[/dim]",
-        border_style="green",
+        border_style="green"
+        if (not collector.budget_report or collector.budget_report.is_within_budget)
+        else "red",
     )
     console.print(panel)
 
@@ -87,10 +101,10 @@ def render_summary_panel(stats, collector: Collector, output_dest: str = ""):
 @click.pass_context
 def cli(ctx: click.Context, version: bool):
     """
-    [bold green]focuspack[/bold green]: Focus-driven, budget-aware codebase context packager for LLMs.
+    focuspack: Focus-driven, budget-aware codebase context packager for LLMs.
     """
     if version:
-        console.print(f"[bold green]focuspack[/bold green] version [cyan]{__version__}[/cyan]")
+        console.print(f"focuspack version {__version__}")
         ctx.exit(0)
 
     if ctx.invoked_subcommand is None:
@@ -113,11 +127,21 @@ def cli(ctx: click.Context, version: bool):
     help="Dependency graph traversal depth for contracts.",
 )
 @click.option(
+    "--include-peripherals",
+    is_flag=True,
+    help="Include peripheral/unrelated files in content even when focus targets are active.",
+)
+@click.option(
     "--budget",
     "-b",
     type=str,
     default=None,
     help="Target token budget (e.g. '32k', '64k', '128k'). Adaptively tiers files to fit.",
+)
+@click.option(
+    "--strict-budget",
+    is_flag=True,
+    help="Exit with non-zero error code if output exceeds the requested token budget.",
 )
 @click.option(
     "--task",
@@ -204,7 +228,9 @@ def pack(
     path: str,
     focus: tuple[str, ...],
     depth: int,
+    include_peripherals: bool,
     budget: str | None,
+    strict_budget: bool,
     task: str | None,
     output: str | None,
     format: str,
@@ -242,7 +268,9 @@ def pack(
         mode=mode.lower(),
         focus_targets=list(focus),
         focus_depth=depth,
+        include_peripherals=include_peripherals,
         token_budget=parsed_budget,
+        strict_budget=strict_budget,
         task_template=task,
         max_file_size_bytes=max_bytes,
         include_patterns=list(include),
@@ -252,17 +280,24 @@ def pack(
     )
 
     collector = Collector(config)
-    if not quiet and not stdout:
-        with console.status(
-            "[bold green]Building dependency graph and optimizing context...[/bold green]"
-        ):
+    try:
+        if not quiet and not stdout:
+            with console.status(
+                "[bold green]Building dependency graph and optimizing context...[/bold green]"
+            ):
+                files = collector.collect(git_diff_only=diff)
+                stats = Analyzer.compute_stats(files)
+                file_tree = collector.build_file_tree(files)
+        else:
             files = collector.collect(git_diff_only=diff)
             stats = Analyzer.compute_stats(files)
             file_tree = collector.build_file_tree(files)
-    else:
-        files = collector.collect(git_diff_only=diff)
-        stats = Analyzer.compute_stats(files)
-        file_tree = collector.build_file_tree(files)
+    except FileNotFoundError as e:
+        err_console.print(f"[bold red]Error:[/bold red] {e}")
+        sys.exit(1)
+    except Exception as e:
+        err_console.print(f"[bold red]Unexpected error:[/bold red] {e}")
+        sys.exit(1)
 
     if not files:
         if not quiet:
@@ -279,6 +314,21 @@ def pack(
         budget_report=collector.budget_report,
         task_prompt=task,
     )
+
+    # Budget compliance verification
+    if collector.budget_report and not collector.budget_report.is_within_budget:
+        overflow_pct = collector.budget_report.utilization_pct - 100.0
+        if not quiet:
+            err_console.print(
+                f"[bold red]Alert:[/bold red] Output exceeds target budget by {overflow_pct:.1f}% "
+                f"({collector.budget_report.final_tokens:,} tokens > {collector.budget_report.total_budget:,} budget).\n"
+                f"[dim]The focus target contains large implementations that could not be fully shrunk without losing API structure.[/dim]"
+            )
+        if strict_budget:
+            err_console.print(
+                "[bold red]Error:[/bold red] Exiting due to --strict-budget violation."
+            )
+            sys.exit(1)
 
     # Output routing
     dest_msg = []
@@ -369,6 +419,7 @@ def analyze(path: str, top: int):
 @cli.command()
 @click.argument("path", default=".", type=click.Path(exists=True, file_okay=False, dir_okay=True))
 @click.option("--budget", "-b", help="Target token budget (e.g. 32k).")
+@click.option("--strict-budget", is_flag=True, help="Exit with error if budget exceeded.")
 @click.option("--task", "-t", help="Task prompt template.")
 @click.option("--copy", "-c", is_flag=True, help="Copy to clipboard.")
 @click.option("--output", "-o", help="Output file path.")
@@ -377,6 +428,7 @@ def diff(
     ctx: click.Context,
     path: str,
     budget: str | None,
+    strict_budget: bool,
     task: str | None,
     copy: bool,
     output: str | None,
@@ -384,7 +436,16 @@ def diff(
     """
     Package only git-changed files + their connected dependency contracts.
     """
-    ctx.invoke(pack, path=path, budget=budget, task=task, copy=copy, output=output, diff=True)
+    ctx.invoke(
+        pack,
+        path=path,
+        budget=budget,
+        strict_budget=strict_budget,
+        task=task,
+        copy=copy,
+        output=output,
+        diff=True,
+    )
 
 
 @cli.command()
@@ -402,7 +463,9 @@ def init(path: str):
         "output_format": "xml",
         "mode": "auto",
         "token_budget": 32000,
+        "strict_budget": False,
         "focus_depth": 1,
+        "include_peripherals": False,
         "focus_targets": [],
         "max_size": "500kb",
         "exclude": ["docs/build/**", "scratch/**"],

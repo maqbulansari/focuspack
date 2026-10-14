@@ -1,5 +1,5 @@
 """
-Codebase analysis, token estimation, and metrics module for repodigest.
+Codebase analysis, token estimation, and metrics module for focuspack.
 """
 
 from __future__ import annotations
@@ -61,22 +61,20 @@ class Analyzer:
             except Exception:
                 pass
 
-        # High-accuracy fallback heuristic for source code and markdown
-        # Words + punctuation + special code tokens
-        # Heuristic: ~3.8 characters per token on average for code/text
-        parts = re.findall(r"\w+|[^\w\s]|\s+", text)
+        # High-accuracy fallback heuristic calibrated against cl100k_base (~3.85 chars/token)
+        # Groups whitespace runs, identifiers, and compound punctuation
+        parts = re.findall(r"[a-zA-Z0-9_]+|[^\s\w]+|\s+", text)
         estimated = 0
         for part in parts:
             if part.isspace():
-                # Whitespace runs (indents, newlines)
                 estimated += max(1, len(part) // 4)
-            elif len(part) > 6:
-                # Long words / identifiers often split into multiple sub-word tokens
-                estimated += max(1, (len(part) + 2) // 4)
-            else:
+            elif len(part) <= 4:
                 estimated += 1
+            else:
+                estimated += max(1, (len(part) + 2) // 4)
 
-        return max(1, estimated)
+        char_bound = len(text) / 3.85
+        return max(1, int((estimated * 0.4) + (char_bound * 0.6)))
 
     @staticmethod
     def format_bytes(size_bytes: int) -> str:

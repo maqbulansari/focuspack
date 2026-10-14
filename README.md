@@ -11,38 +11,72 @@
 
 *Don't dump blindly. Pack the exact slice of code your LLM needs with AST contracts, semantic roles, and adaptive token budgets.*
 
-[Quick Start](#-quick-start) • [Why focuspack?](#-why-focuspack-vs-flat-dumpers) • [Key Features](#-key-features) • [CLI Reference](#-cli-reference) • [Contributing](#-contributing)
+[Quick Start](#-quick-start) • [Why focuspack?](#-why-focuspack) • [How Budgeting Works](#-adaptive-multi-stage-budget-engine) • [Comparison](#-competitive-comparison) • [CLI Reference](#-cli-reference) • [Contributing](#-contributing)
 
 ---
 
 </div>
 
-## 💡 Why focuspack? vs Flat Dumpers
+## 💡 Why focuspack?
 
-Static file packagers (like Repomix or code2prompt) suffer from a fundamental blind spot: **they treat codebases as flat buckets of files**. If you run them on a 100-file project, they dump all 100 files into a 150k-token monolith.
+Static file dumpers (like Repomix or code2prompt) suffer from a fundamental blind spot: **they treat codebases as flat buckets of files**. If you run them on a project, they dump dozens of files into a 100k+ token monolith.
 
 ### The Attention Breakdown (Lost in the Middle)
-Transformer research proves that as context length grows, reasoning accuracy plummets in the middle 60–80% of the prompt. Dumping 80 irrelevant files dilutes attention heads, causing missed edge cases and hallucinations.
+Transformer research proves that as context length grows, reasoning accuracy plummets in the middle 60–80% of the prompt. Dumping 80 irrelevant files dilutes attention heads, causing missed edge cases, hallucinated methods, and sluggish completions.
 
-### What LLMs Actually Love to Read
-1. **High Signal-to-Noise:** The file you are actively touching in **FULL**.
-2. **Contract-First Dependencies:** When an LLM calls helper functions, it does **not** need 400 lines of implementation logic. It only needs the **interface contract** (class signatures, argument types, return annotations, and docstrings).
-3. **Adaptive Token Budgets:** If you have a 32k or 64k token target, the tool should **actively compress and tier** files to fit—not just fail a CI assertion.
-4. **Semantic Role Labeling:** Tagging files with `role="focus_target"` vs `role="dependency_contract"` explicitly instructs the model what it is allowed to modify versus what is an immutable external API.
+### What LLMs Actually Need
+1. **High Signal-to-Noise:** The file you are actively modifying in **FULL**.
+2. **Contract-First Dependencies:** When an LLM calls helper functions or imports classes, it rarely needs hundreds of lines of internal implementation. It only needs the **interface contract** (class hierarchy, method signatures, argument types, return annotations, and docstrings).
+3. **Adaptive Token Fitting:** When constrained by a token budget (e.g., `--budget 8k` or `--budget 32k`), context tools must intelligently tier and adapt code—**without sacrificing the target file you asked to inspect**.
+4. **Semantic Role Labeling:** Tagging files with `role="focus_target"` vs `role="dependency_contract"` explicitly instructs the model what it is asked to modify versus what is an immutable external API.
 
 ---
 
-## ⚡ Feature Comparison
+## ⚡ Competitive Comparison
 
-| Capability | Flat Dumpers (Repomix, etc.) | 🎯 focuspack |
-| :--- | :---: | :---: |
-| **Selection Model** | Flat / Dump All (or manual globs) | **Focus-Driven Graph** (`--focus src/auth.py`) |
-| **Dependency Awareness** | ❌ None (no AST import traversal) | ✅ **Automated import graph discovery** |
-| **Token Budgeting** | ❌ Dummy exit-code check | ✅ **Active Adaptive Fitting** (`--budget 32k`) |
-| **Multi-Tier Compression** | ❌ Global all-or-nothing flag | ✅ **Tiered**: Focus is Full, dependencies are Contracts |
-| **Semantic Role Tags** | ❌ Generic `<file path="...">` | ✅ `<file role="focus_target\|dependency_contract">` |
-| **Task / Mission Framing** | ❌ Raw code dump | ✅ `--task bugfix\|review\|refactor` system anchors |
-| **Runtime Requirement** | ⚠️ Node.js / NPM (`npx repomix`) | ✅ **Zero-Node Pure Python** (`pip`, `uvx`) |
+How `focuspack` compares against flat dumpers and other context tools under constrained budgets:
+
+| Capability | Flat Dumpers (Repomix) | codesurf | ctxeng | 🎯 focuspack |
+| :--- | :---: | :---: | :---: | :---: |
+| **Selection Model** | Flat / Dump All (globs) | Focus Path | Focus Path | **Focus-Driven Graph** (`-F`) |
+| **Dependency Awareness** | ❌ None | ⚠️ Path heuristic | ❌ None | ✅ **AST Import Graph (BFS)** |
+| **Target Preservation under Budget** | N/A (no budget fitting) | ❌ **Drops target file** at low budgets | ❌ **Truncates mid-line** | ✅ **Preserves target; compresses tiered** |
+| **Budget Enforcement** | ❌ Exit code 1 check only | Silent file omission | String slicing | ✅ **4-Stage Adaptive Optimizer** |
+| **AST Interface Skeletons** | Global `--compress` flag | Regex-based | ❌ None | ✅ **Python AST + JS/TS outline** |
+| **Semantic Role Tags** | ❌ `<file path="...">` | ❌ None | ❌ None | ✅ `<file role="focus_target\|dependency_contract">` |
+| **Task / Mission Framing** | ❌ Raw dump | ❌ None | ❌ None | ✅ `--task bugfix\|review\|refactor` |
+| **Runtime Requirement** | ⚠️ Node.js / NPM (`npx`) | Python | Python | ✅ **Zero-Node Pure Python** (`pip`, `uvx`) |
+
+---
+
+## 🧠 Adaptive Multi-Stage Budget Engine
+
+When you supply `--budget <size>` (e.g. `--budget 8k` or `--budget 32k`), `focuspack` does **not** naively truncate text or silently drop your primary target. It executes a multi-stage optimization pipeline:
+
+```
+[All Repo Files]
+       │
+       ▼  Stage 1: Peripheral Pruning
+[Focus Target (FULL) + Contracts (FULL)]
+       │
+       ▼  Stage 2: Contract Skeletonization
+[Focus Target (FULL) + Contracts (AST Skeletons)]
+       │
+       ▼  Stage 3: Contract Docstring Stripping (AST Transformer)
+[Focus Target (FULL) + Contracts (Minimal AST)]
+       │
+       ▼  Stage 4: Target Method Body Compression (AST)
+[Focus Target (Signatures + Compressed Methods) + Contracts]
+       │
+       ▼  (Optional: --strict-budget)
+[Guaranteed Fit or Non-Zero Exit Code]
+```
+
+1. **Stage 1 — Peripheral Pruning:** Unrelated modules, documentation files (`README.md`, `LICENSE`), and peripheral assets are omitted from file contents while preserving repository architecture in the directory tree.
+2. **Stage 2 — Dependency Contract Skeletons:** Directly imported dependencies are converted into AST interface contracts. Method bodies are replaced with `...`, preserving class definitions, type hints, and docstrings.
+3. **Stage 3 — Clean AST Docstring Stripping:** If further reduction is required, contract docstrings are cleanly removed using an `ast.NodeTransformer` without corrupting code or leaving loose strings.
+4. **Stage 4 — Large Target Method Compression:** If the focus target alone exceeds the budget, verbose internal method bodies are compressed to `...` while preserving public interfaces, arguments, return types, and docstrings.
+5. **Strict Budget Mode (`--strict-budget`):** In CI/CD pipelines or automated workflows, `--strict-budget` guarantees an exit code `1` if even Stage 4 cannot satisfy the requested limit.
 
 ---
 
@@ -54,37 +88,40 @@ Transformer research proves that as context length grows, reasoning accuracy plu
 # Install via pip
 pip install focuspack
 
-# Or run instantly with uvx / pipx
+# Or run instantly with uvx / pipx without installing
 uvx focuspack
 ```
 
-### 1-Minute Workflows
+### Common Workflows
 
 ```bash
 # 1. Target a specific file — packages auth.py in FULL and its imported dependencies as Skeletons:
 focuspack --focus src/auth/service.py
 
-# 2. Fit strictly within a 32k token window with zero overflow:
-focuspack --focus src/auth/service.py --budget 32k
+# 2. Fit adaptively within an 8k or 32k token window:
+focuspack -F src/auth/service.py --budget 8k
 
 # 3. Add an automated debugging mission and copy straight to clipboard:
-focuspack --focus src/payment.py --task bugfix --copy
+focuspack -F src/payment.py --task bugfix --copy
 
 # 4. Package git-modified files + their connected contracts:
 focuspack diff --copy
+
+# 5. Enforce strict budget gating in CI scripts:
+focuspack -F src/api.py --budget 16k --strict-budget
 ```
 
 ---
 
 ## 📦 Output Format (Claude & LLM Optimized)
 
-By default, `focuspack` generates semantic XML structured for Anthropic Claude 3.5/3.7, OpenAI GPT-4o, and Gemini:
+By default, `focuspack` generates semantic XML structured for Anthropic Claude 3.5/3.7, OpenAI GPT-4o, and Google Gemini:
 
 ```xml
 <documents>
   <context_manifest>
     <tool>focuspack v0.2.0</tool>
-    <token_budget total_allowed="32000" tokens_used="14520" utilization="45.4%" status="fits"/>
+    <token_budget total_allowed="8000" tokens_used="6420" utilization="80.2%" status="fits"/>
     <role_counts focus_targets="1" dependency_contracts="3"/>
   </context_manifest>
 
@@ -120,6 +157,16 @@ By default, `focuspack` generates semantic XML structured for Anthropic Claude 3
 
 ---
 
+## 🛡️ Secret & Credential Scanning
+
+`focuspack` automatically scans and redacts sensitive credentials before code is packaged or copied:
+- **API Keys & Tokens:** OpenAI (`sk-...`), Anthropic (`sk-ant-...`), GitHub tokens (`ghp_...`, `github_pat_...`), Slack tokens.
+- **Cloud Credentials:** AWS Access Keys (`AKIA...`), AWS Secret Keys.
+- **Database Connection Strings:** Complete password redaction across `postgres://`, `mysql://`, `mongodb://`, `redis://`, and `mssql://` URLs.
+- **Private Keys:** RSA, SSH, and generic PEM private keys.
+
+---
+
 ## 📖 CLI Reference
 
 ```text
@@ -140,9 +187,11 @@ Commands:
 
 | Option | Flag | Description | Default |
 | :--- | :--- | :--- | :--- |
-| `--focus` | `-F` | File(s) or directories to focus on (kept in Full; imports become Contracts) | `None` |
+| `--focus` | `-F` | File(s) or directories to focus on (kept in Full; dependencies become Contracts) | `None` |
 | `--depth` | `-d` | Dependency traversal depth (1 = direct imports, 2 = 2 hops) | `1` |
-| `--budget` | `-b` | Token budget (e.g. `32k`, `64k`). Dynamically tiers files to fit | `None` |
+| `--budget` | `-b` | Token budget (e.g. `8k`, `32k`, `64k`). Adaptively tiers files to fit | `None` |
+| `--strict-budget` | | Exit with non-zero error code if output exceeds requested budget | `False` |
+| `--include-peripherals` | | Keep peripheral/unrelated files in output even when focus targets are active | `False` |
 | `--task` | `-t` | Task prompt template (`bugfix`, `review`, `refactor`, `explain`, `test`) | `None` |
 | `--format` | `-f` | Output format (`xml`, `markdown`, `json`, `plain`) | `xml` |
 | `--mode` | `-m` | Compression mode (`auto`, `full`, `skeleton`) | `auto` |
@@ -151,6 +200,7 @@ Commands:
 | `--diff` | | Focus on git uncommitted/staged changes + connected contracts | `False` |
 | `--output` | `-o` | Output file path | `context.<format>` |
 | `--no-redact-secrets` | | Disable automated secret redaction | `False` |
+| `--tree / --no-tree` | | Include directory tree diagram | `True` |
 | `--quiet` | `-q` | Suppress console UI | `False` |
 
 ---

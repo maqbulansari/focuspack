@@ -72,3 +72,26 @@ def test_cli_init(tmp_path: Path):
     result = runner.invoke(cli, ["init", str(tmp_path)])
     assert result.exit_code == 0
     assert (tmp_path / ".focuspack.json").exists()
+
+
+def test_cli_strict_budget_failure(tmp_path: Path):
+    # Create code that will exceed a tiny budget
+    (tmp_path / "large.py").write_text("x = 1\n" * 100, encoding="utf-8")
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["pack", str(tmp_path), "--budget", "5", "--strict-budget"],
+    )
+    assert result.exit_code == 1
+    assert "strict-budget violation" in result.output
+
+
+def test_cli_nonexistent_focus_error(tmp_path: Path):
+    (tmp_path / "valid.py").write_text("x = 1\n", encoding="utf-8")
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["pack", str(tmp_path), "-F", "ghost_file.py"],
+    )
+    assert result.exit_code == 1
+    assert "ghost_file.py" in result.output

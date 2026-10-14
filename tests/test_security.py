@@ -39,3 +39,20 @@ def add(a: int, b: int) -> int:
     redacted, count = scanner.redact_text(code)
     assert count == 0
     assert redacted == code
+
+
+def test_database_credentials_redaction():
+    scanner = SecurityScanner()
+    code = 'DATABASE_URL = "postgres://admin:hunter2pass@host.internal:5432/production_db"'
+    findings = scanner.scan_text(code, "settings.py")
+    assert len(findings) == 1
+    assert findings[0].pattern_name == "Database Credentials"
+    assert "hunter2pass" not in findings[0].matched_preview
+
+    redacted, count = scanner.redact_text(code)
+    assert count == 1
+    assert "hunter2pass" not in redacted
+    assert (
+        "postgres://admin:[REDACTED_SECRET: Database Credentials]@host.internal:5432/production_db"
+        in redacted
+    )

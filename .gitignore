@@ -60,9 +60,9 @@ Thumbs.db
 .mypy_cache/
 .ruff_cache/
 
-# Local repodigest outputs / scratch
-*.digest.md
-*.digest.json
-*.digest.xml
-digest.md
-digest.txt
+# Local focuspack outputs / scratch
+*.focuspack.md
+*.focuspack.xml
+*.focuspack.json
+context.*
+digest.*
