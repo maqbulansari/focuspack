@@ -67,10 +67,10 @@ focuspack = "focuspack.cli:main"
 fp = "focuspack.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/USER/focuspack"
-Repository = "https://github.com/USER/focuspack"
-Issues = "https://github.com/USER/focuspack/issues"
-Documentation = "https://github.com/USER/focuspack#readme"
+Homepage = "https://github.com/maqbulansari/focuspack"
+Repository = "https://github.com/maqbulansari/focuspack"
+Issues = "https://github.com/maqbulansari/focuspack/issues"
+Documentation = "https://github.com/maqbulansari/focuspack#readme"
 
 [tool.hatch.build.targets.wheel]
 packages = ["focuspack"]

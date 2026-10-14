@@ -12,7 +12,7 @@ Thank you for your interest in contributing to **focuspack**! We welcome bug fix
 
 ### 2. Clone the Repository
 ```bash
-git clone https://github.com/USER/focuspack.git
+git clone https://github.com/maqbulansari/focuspack.git
 cd focuspack
 ```
 
