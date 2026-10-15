@@ -56,3 +56,17 @@ def test_database_credentials_redaction():
         "postgres://admin:[REDACTED_SECRET: Database Credentials]@host.internal:5432/production_db"
         in redacted
     )
+
+
+def test_anthropic_key_not_mislabeled_as_openai():
+    scanner = SecurityScanner()
+    code = (
+        'anthropic_client = Anthropic(api_key="sk-ant-api03-abcdefghijklmnopqrstuvwxyz1234567890")'
+    )
+    findings = scanner.scan_text(code, "ai.py")
+    assert len(findings) == 1
+    # Must be recognized as Anthropic API Key, NOT OpenAI API Key
+    assert findings[0].pattern_name == "Anthropic API Key"
+    redacted, count = scanner.redact_text(code)
+    assert count == 1
+    assert "[REDACTED_SECRET: Anthropic API Key]" in redacted

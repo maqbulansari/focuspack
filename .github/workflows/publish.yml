@@ -20,9 +20,14 @@ jobs:
       with:
         python-version: "3.11"
 
-    - name: Install build tools
+    - name: Install dependencies
       run: |
         python -m pip install --upgrade pip build twine
+        pip install -e ".[dev,all]"
+
+    - name: Run Test Suite Prior to Release
+      run: |
+        pytest
 
     - name: Build sdist and wheel
       run: |
@@ -30,5 +35,3 @@ jobs:
 
     - name: Publish package distributions to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
-      with:
-        password: ${{ secrets.PYPI_API_TOKEN }}

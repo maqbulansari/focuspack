@@ -80,7 +80,12 @@ def render_summary_panel(stats, collector: Collector, output_dest: str = ""):
         )
 
     if collector.findings:
-        table.add_row("Secrets Redacted", f"[bold red]{len(collector.findings)}[/bold red]")
+        if collector.config.redact_secrets:
+            table.add_row("Secrets Redacted", f"[bold red]{len(collector.findings)}[/bold red]")
+        else:
+            table.add_row(
+                "Secrets Detected (Unredacted)", f"[bold red]{len(collector.findings)}[/bold red]"
+            )
 
     if output_dest:
         table.add_row("Destination", f"[green]{output_dest}[/green]")
@@ -243,7 +248,17 @@ def cli(ctx: click.Context, version: bool):
     is_flag=True,
     help="Suppress terminal UI and banner output.",
 )
+@click.option(
+    "--config",
+    "-C",
+    "config_file",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Path to .focuspack.json configuration file.",
+)
+@click.pass_context
 def pack(
+    ctx: click.Context,
     path: str,
     focus: tuple[str, ...],
     depth: int,
@@ -263,10 +278,13 @@ def pack(
     redact_secrets: bool,
     tree: bool,
     quiet: bool,
+    config_file: str | None = None,
 ):
     """
     Package focused codebase context optimized for LLMs.
     """
+    base_cfg = FocusPackConfig.find_and_load(root_path=path, explicit_config=config_file)
+
     try:
         max_bytes = parse_tokens_or_size(max_size)
     except Exception:
@@ -274,29 +292,51 @@ def pack(
         sys.exit(1)
 
     parsed_budget: int | None = None
-    if budget:
+    if budget is not None:
         try:
             parsed_budget = parse_tokens_or_size(budget)
+            if parsed_budget <= 0:
+                err_console.print(
+                    f"[bold red]Error:[/bold red] Token budget must be greater than 0, got: {budget}"
+                )
+                sys.exit(1)
         except Exception:
             err_console.print(f"[bold red]Error:[/bold red] Invalid budget value: {budget}")
             sys.exit(1)
 
-    config = FocusPackConfig(
-        root_path=path,
-        output_format=format.lower(),
-        mode=mode.lower(),
-        focus_targets=list(focus),
-        focus_depth=depth,
-        include_peripherals=include_peripherals,
-        token_budget=parsed_budget,
-        strict_budget=strict_budget,
-        task_template=task,
-        max_file_size_bytes=max_bytes,
-        include_patterns=list(include),
-        exclude_patterns=list(exclude),
-        redact_secrets=redact_secrets,
-        include_tree=tree,
-    )
+    from click.core import ParameterSource
+
+    # CLI explicit parameters override configuration file values
+    if ctx.get_parameter_source("focus") != ParameterSource.DEFAULT or focus:
+        base_cfg.focus_targets = list(focus)
+    if ctx.get_parameter_source("format") != ParameterSource.DEFAULT:
+        base_cfg.output_format = format.lower()
+    if ctx.get_parameter_source("mode") != ParameterSource.DEFAULT:
+        base_cfg.mode = mode.lower()
+    if ctx.get_parameter_source("depth") != ParameterSource.DEFAULT:
+        base_cfg.focus_depth = depth
+    if ctx.get_parameter_source("include_peripherals") != ParameterSource.DEFAULT:
+        base_cfg.include_peripherals = include_peripherals
+    if ctx.get_parameter_source("budget") != ParameterSource.DEFAULT:
+        base_cfg.token_budget = parsed_budget
+    if ctx.get_parameter_source("strict_budget") != ParameterSource.DEFAULT:
+        base_cfg.strict_budget = strict_budget
+    if ctx.get_parameter_source("task") != ParameterSource.DEFAULT:
+        base_cfg.task_template = task
+    if ctx.get_parameter_source("output") != ParameterSource.DEFAULT:
+        base_cfg.output_file = output
+    if ctx.get_parameter_source("include") != ParameterSource.DEFAULT or include:
+        base_cfg.include_patterns = list(include)
+    if ctx.get_parameter_source("exclude") != ParameterSource.DEFAULT or exclude:
+        base_cfg.exclude_patterns = list(exclude)
+    if ctx.get_parameter_source("max_size") != ParameterSource.DEFAULT:
+        base_cfg.max_file_size_bytes = max_bytes
+    if ctx.get_parameter_source("redact_secrets") != ParameterSource.DEFAULT:
+        base_cfg.redact_secrets = redact_secrets
+    if ctx.get_parameter_source("tree") != ParameterSource.DEFAULT:
+        base_cfg.include_tree = tree
+
+    config = base_cfg
 
     collector = Collector(config)
     try:
@@ -328,10 +368,10 @@ def pack(
         files=files,
         stats=stats,
         file_tree=file_tree,
-        fmt=format.lower(),
-        include_tree=tree,
+        fmt=config.output_format,
+        include_tree=config.include_tree,
         budget_report=collector.budget_report,
-        task_prompt=task,
+        task_prompt=config.task_template,
     )
 
     # Re-verify and lock exact rendered tokens count against output_text
@@ -352,10 +392,10 @@ def pack(
             files=files,
             stats=stats,
             file_tree=file_tree,
-            fmt=format.lower(),
-            include_tree=tree,
+            fmt=config.output_format,
+            include_tree=config.include_tree,
             budget_report=collector.budget_report,
-            task_prompt=task,
+            task_prompt=config.task_template,
         )
 
     # Budget compliance verification
@@ -379,10 +419,10 @@ def pack(
         click.echo(output_text)
         return
 
-    target_output_file = output
+    target_output_file = output or config.output_file
     if target_output_file is None and not copy:
         ext_map = {"xml": "xml", "markdown": "md", "json": "json", "plain": "txt"}
-        target_output_file = f"context.{ext_map.get(format.lower(), 'xml')}"
+        target_output_file = f"context.{ext_map.get(config.output_format.lower(), 'xml')}"
 
     if target_output_file:
         out_path = Path(target_output_file)

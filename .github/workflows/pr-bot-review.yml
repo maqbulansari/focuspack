@@ -7,30 +7,12 @@ on:
 permissions:
   pull-requests: write
   issues: write
-  contents: read
 
 jobs:
   charter-guard:
     name: 🤖 Charter & Scope Review Bot
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout PR Code
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 2
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Run Local Charter Checker
-        id: charter_script
-        continue-on-error: true
-        run: |
-          python scripts/check_charter.py
-
       - name: Automated PR Bot Review & Labeling
         uses: actions/github-script@v7
         with:
@@ -90,30 +72,61 @@ jobs:
             if (foundRedFlags.length > 0) {
               issuesFound.push(`⚠️ **Non-Goal Warning**: Detected terms matching explicit Non-Goals in [CHARTER.md](https://github.com/maqbulansari/focuspack/blob/main/CHARTER.md): \`${foundRedFlags.join(", ")}\`. Please verify this does not violate project guardrails.`);
               labelsToAdd.push("out-of-scope");
+            } else {
+              labelsToRemove.push("out-of-scope");
             }
 
             if (!checklistComplete) {
               issuesFound.push("⚠️ **Incomplete Charter Checklist**: Please ensure all 4 items under `🎯 Goal Alignment Verification` in the PR description are verified and checked.");
               labelsToAdd.push("needs-checklist");
+            } else {
+              labelsToRemove.push("needs-checklist");
             }
 
             if (codeChanged && !testsChanged) {
               issuesFound.push("⚠️ **Missing Tests**: Changes were made to `focuspack/` source code without corresponding updates in `tests/`. Please add unit tests to maintain coverage.");
               labelsToAdd.push("needs-tests");
+            } else {
+              labelsToRemove.push("needs-tests");
             }
 
             if (issuesFound.length === 0) {
               labelsToAdd.push("goal-aligned");
+            } else {
+              labelsToRemove.push("goal-aligned");
             }
 
-            // Apply Labels
-            if (labelsToAdd.length > 0) {
+            // Apply and remove labels accurately
+            const prDetails = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number: prNumber,
+            });
+            const currentLabels = (prDetails.data.labels || []).map(l => l.name);
+
+            const toAdd = labelsToAdd.filter(l => !currentLabels.includes(l));
+            if (toAdd.length > 0) {
               await github.rest.issues.addLabels({
                 owner,
                 repo,
                 issue_number: prNumber,
-                labels: labelsToAdd,
+                labels: toAdd,
               });
+            }
+
+            for (const label of labelsToRemove) {
+              if (currentLabels.includes(label)) {
+                try {
+                  await github.rest.issues.removeLabel({
+                    owner,
+                    repo,
+                    issue_number: prNumber,
+                    name: label,
+                  });
+                } catch (e) {
+                  // Ignore if label was already removed
+                }
+              }
             }
 
             // 5. Construct Sticky Bot Review Comment

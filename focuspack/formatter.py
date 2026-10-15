@@ -7,13 +7,22 @@ contract identification, and prompt-cache alignment.
 from __future__ import annotations
 
 import json
+import re
 from enum import Enum
+from xml.sax.saxutils import quoteattr
 
+from focuspack import __version__
 from focuspack.analyzer import Analyzer, RepoStats
 from focuspack.budget import BudgetReport
 from focuspack.collector import CollectedFile
 from focuspack.graph import FileRole
 from focuspack.templates import get_task_instruction
+
+
+def _escape_cdata(text: str) -> str:
+    """Safely escape ]]> in CDATA sections so XML parsers do not break."""
+    return text.replace("]]>", "]]]]><![CDATA[>")
+
 
 # Language mapping for markdown code fences
 EXT_TO_LANG = {
@@ -97,7 +106,7 @@ class Formatter:
         parts: list[str] = [
             "<documents>",
             "  <context_manifest>",
-            "    <tool>focuspack v0.2.0</tool>",
+            f"    <tool>focuspack v{__version__}</tool>",
             f"    <total_files>{stats.total_files}</total_files>",
             f"    <total_tokens>{stats.total_tokens}</total_tokens>",
             f"    <total_size>{Analyzer.format_bytes(stats.total_bytes)}</total_size>",
@@ -122,23 +131,29 @@ class Formatter:
             parts.extend(
                 [
                     "  <directory_structure>",
-                    f"<![CDATA[\n{file_tree}\n]]>",
+                    f"<![CDATA[\n{_escape_cdata(file_tree)}\n]]>",
                     "  </directory_structure>",
                 ]
             )
 
         parts.append("  <files>")
         for idx, f in enumerate(files, start=1):
-            role_attr = f'role="{f.role.value}"'
-            mode_attr = f'mode="{f.mode}"'
-            imports_attr = f'imports="{", ".join(f.imports)}"' if f.imports else ""
-            attrs = f'index="{idx}" path="{f.relative_path}" {role_attr} {mode_attr} tokens="{f.token_count}" {imports_attr}'.strip()
+            attrs_list = [
+                f'index="{idx}"',
+                f"path={quoteattr(f.relative_path)}",
+                f"role={quoteattr(f.role.value)}",
+                f"mode={quoteattr(f.mode)}",
+                f'tokens="{f.token_count}"',
+            ]
+            if f.imports:
+                attrs_list.append(f"imports={quoteattr(', '.join(f.imports))}")
+            attrs = " ".join(attrs_list)
 
             parts.extend(
                 [
                     f"    <file {attrs}>",
                     "      <document_content><![CDATA[",
-                    f.content,
+                    _escape_cdata(f.content),
                     "]]></document_content>",
                     "    </file>",
                 ]
@@ -150,7 +165,7 @@ class Formatter:
             parts.extend(
                 [
                     "  <task_instruction>",
-                    f"<![CDATA[\n{instruction}\n]]>",
+                    f"<![CDATA[\n{_escape_cdata(instruction)}\n]]>",
                     "  </task_instruction>",
                 ]
             )
@@ -172,7 +187,7 @@ class Formatter:
         parts: list[str] = [
             "# Codebase Context",
             "",
-            "> Generated with [focuspack](https://github.com/USER/focuspack) — Focus-driven LLM context",
+            "> Generated with [focuspack](https://github.com/maqbulansari/focuspack) — Focus-driven LLM context",
             "",
         ]
 
@@ -229,6 +244,11 @@ class Formatter:
                 else ("📦 Contract" if f.role == FileRole.DEPENDENCY_CONTRACT else "📄 Peripheral")
             )
 
+            # Ensure code fence does not collide with file content containing backticks
+            fence_ticks = re.findall(r"`+", f.content)
+            max_ticks = max((len(t) for t in fence_ticks), default=2)
+            fence = "`" * max(3, max_ticks + 1)
+
             parts.extend(
                 [
                     "---",
@@ -240,9 +260,9 @@ class Formatter:
                         else ""
                     ),
                     "",
-                    f"```{lang}",
+                    f"{fence}{lang}",
                     f.content,
-                    "```",
+                    f"{fence}",
                     "",
                 ]
             )
@@ -261,7 +281,7 @@ class Formatter:
     ) -> str:
         """Format as structured JSON."""
         data = {
-            "generator": "focuspack v0.2.0",
+            "generator": f"focuspack v{__version__}",
             "task": get_task_instruction(task_prompt),
             "summary": {
                 "total_files": stats.total_files,

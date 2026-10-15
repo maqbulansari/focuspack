@@ -4,9 +4,26 @@ Configuration constants, default patterns, and models for focuspack.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from re import Pattern
+
+
+def parse_size_or_tokens(val_str: str | int) -> int:
+    """Parse tokens or sizes like '32k', '64k', '100000', or '500kb' into integers."""
+    if isinstance(val_str, (int, float)):
+        return int(val_str)
+    clean = str(val_str).strip().lower()
+    if clean.endswith("k") or clean.endswith("kb"):
+        num = float(clean.rstrip("kb").rstrip("k"))
+        return int(num * 1000)
+    elif clean.endswith("m") or clean.endswith("mb"):
+        num = float(clean.rstrip("mb").rstrip("m"))
+        return int(num * 1_000_000)
+    return int(clean)
+
 
 # Default directory and file ignore patterns (similar to .gitignore syntax)
 DEFAULT_IGNORE_PATTERNS: list[str] = [
@@ -27,14 +44,14 @@ DEFAULT_IGNORE_PATTERNS: list[str] = [
     ".coverage.*",
     "htmlcov/",
     "*.egg-info/",
-    "build/",
-    "dist/",
+    "/build/",
+    "/dist/",
     ".eggs/",
     # Virtual environments
     ".venv/",
     "venv/",
-    "ENV/",
-    "env/",
+    "/ENV/",
+    "/env/",
     # JavaScript / Node
     "node_modules/",
     ".npm/",
@@ -43,10 +60,10 @@ DEFAULT_IGNORE_PATTERNS: list[str] = [
     "package-lock.json",
     "yarn.lock",
     "pnpm-lock.yaml",
-    # Rust / Go / Java / Other build artifacts
-    "target/",
-    "bin/",
-    "obj/",
+    # Rust / Go / Java / Other build artifacts (anchored to root to avoid dropping packages)
+    "/target/",
+    "/bin/",
+    "/obj/",
     "*.class",
     "*.jar",
     "Cargo.lock",
@@ -69,12 +86,12 @@ DEFAULT_IGNORE_PATTERNS: list[str] = [
     "*.cer",
     "*.pfx",
     "*.p12",
-    # focuspack outputs
+    # focuspack outputs (anchored to root so valid context.py / digest.py packages are kept)
     "*.focuspack.md",
     "*.focuspack.xml",
     "*.focuspack.json",
-    "context.*",
-    "digest.*",
+    "/context.*",
+    "/digest.*",
 ]
 
 # Known binary extensions
@@ -131,12 +148,12 @@ BINARY_EXTENSIONS = {
 # Known sensitive patterns for detection & redaction
 SECRET_PATTERNS: list[tuple[str, Pattern[str]]] = [
     (
-        "OpenAI API Key",
-        re.compile(r"\b(sk-[A-Za-z0-9_-]{20,})\b"),
-    ),
-    (
         "Anthropic API Key",
         re.compile(r"\b(sk-ant-[A-Za-z0-9_-]{20,})\b"),
+    ),
+    (
+        "OpenAI API Key",
+        re.compile(r"\b(sk-(?!ant-)[A-Za-z0-9_-]{20,})\b"),
     ),
     (
         "GitHub Token",
@@ -202,3 +219,64 @@ class FocusPackConfig:
     include_tree: bool = True
     output_file: str | None = None
     copy_to_clipboard: bool = False
+
+    @classmethod
+    def from_file(cls, path: Path | str, root_path: str = ".") -> FocusPackConfig:
+        """Load configuration from a JSON file, mapping its keys to config fields."""
+        cfg_path = Path(path)
+        if not cfg_path.is_file():
+            raise FileNotFoundError(f"Config file not found: {cfg_path}")
+
+        data = json.loads(cfg_path.read_text(encoding="utf-8"))
+        cfg = cls(root_path=root_path)
+
+        if "output_format" in data:
+            cfg.output_format = str(data["output_format"]).lower()
+        if "mode" in data:
+            cfg.mode = str(data["mode"]).lower()
+        if "token_budget" in data and data["token_budget"] is not None:
+            cfg.token_budget = parse_size_or_tokens(data["token_budget"])
+        if "strict_budget" in data:
+            cfg.strict_budget = bool(data["strict_budget"])
+        if "focus_depth" in data:
+            cfg.focus_depth = int(data["focus_depth"])
+        if "include_peripherals" in data:
+            cfg.include_peripherals = bool(data["include_peripherals"])
+        if "focus_targets" in data and isinstance(data["focus_targets"], list):
+            cfg.focus_targets = list(data["focus_targets"])
+        if "max_size" in data:
+            cfg.max_file_size_bytes = parse_size_or_tokens(data["max_size"])
+        if "exclude" in data and isinstance(data["exclude"], list):
+            cfg.exclude_patterns = list(data["exclude"])
+        if "include" in data and isinstance(data["include"], list):
+            cfg.include_patterns = list(data["include"])
+        if "respect_gitignore" in data:
+            cfg.respect_gitignore = bool(data["respect_gitignore"])
+        if "redact_secrets" in data:
+            cfg.redact_secrets = bool(data["redact_secrets"])
+        if "include_tree" in data:
+            cfg.include_tree = bool(data["include_tree"])
+        if "output_file" in data:
+            cfg.output_file = str(data["output_file"])
+        if "task" in data or "task_template" in data:
+            cfg.task_template = data.get("task") or data.get("task_template")
+
+        return cfg
+
+    @classmethod
+    def find_and_load(
+        cls, root_path: str = ".", explicit_config: Path | str | None = None
+    ) -> FocusPackConfig:
+        """
+        Locate and load .focuspack.json if present, or return default config.
+        """
+        if explicit_config:
+            return cls.from_file(explicit_config, root_path=root_path)
+
+        candidate = Path(root_path) / ".focuspack.json"
+        if candidate.is_file():
+            try:
+                return cls.from_file(candidate, root_path=root_path)
+            except Exception:
+                pass
+        return cls(root_path=root_path)

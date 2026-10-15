@@ -138,8 +138,8 @@ class DependencyGraph:
             return resolved
 
         # 2. Absolute Import (level == 0)
-        # Check against all detected package roots (e.g. root, src/, etc.)
-        search_roots = ["", "src"]
+        # Check against all detected package roots (e.g. root, src/, custom roots)
+        search_roots = list(self._package_roots)
         curr_dir_str = curr_dir.as_posix()
         if curr_dir_str and curr_dir_str not in search_roots:
             search_roots.append(curr_dir_str)
@@ -229,12 +229,21 @@ class DependencyGraph:
         focus_set: set[str] = set()
         for target in focus_targets:
             target_norm = clean_relative_path(target).rstrip("/")
+            matched_nodes: list[str] = []
             for p in self.nodes:
                 if p == target_norm or p.startswith(f"{target_norm}/"):
-                    focus_set.add(p)
-                    roles[p] = FileRole.FOCUS_TARGET
-                    self.nodes[p].role = FileRole.FOCUS_TARGET
-                    self.nodes[p].depth = 0
+                    matched_nodes.append(p)
+            # If no exact or directory-prefix match, try matching by suffix/basename
+            if not matched_nodes:
+                for p in self.nodes:
+                    if p.endswith(f"/{target_norm}") or f"/{target_norm}/" in f"/{p}/":
+                        matched_nodes.append(p)
+
+            for p in matched_nodes:
+                focus_set.add(p)
+                roles[p] = FileRole.FOCUS_TARGET
+                self.nodes[p].role = FileRole.FOCUS_TARGET
+                self.nodes[p].depth = 0
 
         # Cycle-safe BFS traversal
         current_frontier = set(focus_set)

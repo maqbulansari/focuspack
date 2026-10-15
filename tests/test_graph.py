@@ -104,3 +104,43 @@ def test_cyclic_import_traversal(tmp_path: Path):
     roles = graph.apply_focus(["app/cyc_a.py"], max_depth=2)
     assert roles["app/cyc_a.py"] == FileRole.FOCUS_TARGET
     assert roles["app/cyc_b.py"] == FileRole.DEPENDENCY_CONTRACT
+
+
+def test_custom_package_roots_resolution(tmp_path: Path):
+    # Tests custom layout like backend/app/service.py imported from backend/app/main.py
+    backend_dir = tmp_path / "backend" / "app"
+    backend_dir.mkdir(parents=True)
+    main_py = backend_dir / "main.py"
+    service_py = backend_dir / "service.py"
+
+    main_py.write_text(
+        "from backend.app import service\ndef run(): service.start()", encoding="utf-8"
+    )
+    service_py.write_text("def start(): pass", encoding="utf-8")
+
+    graph = DependencyGraph(tmp_path)
+    graph.add_file("backend/app/main.py", main_py)
+    graph.add_file("backend/app/service.py", service_py)
+
+    graph.build_graph()
+
+    # backend/app/service.py must be in main.py imports via dynamic root discovery
+    assert "backend/app/service.py" in graph.nodes["backend/app/main.py"].imports
+    roles = graph.apply_focus(["backend/app/main.py"], max_depth=1)
+    assert roles["backend/app/main.py"] == FileRole.FOCUS_TARGET
+    assert roles["backend/app/service.py"] == FileRole.DEPENDENCY_CONTRACT
+
+
+def test_basename_focus_matching_in_graph(tmp_path: Path):
+    app_dir = tmp_path / "src" / "deep"
+    app_dir.mkdir(parents=True)
+    main_file = app_dir / "main.py"
+    main_file.write_text("x = 1", encoding="utf-8")
+
+    graph = DependencyGraph(tmp_path)
+    graph.add_file("src/deep/main.py", main_file)
+    graph.build_graph()
+
+    # Specifying only 'main.py' must match 'src/deep/main.py'
+    roles = graph.apply_focus(["main.py"], max_depth=1)
+    assert roles["src/deep/main.py"] == FileRole.FOCUS_TARGET

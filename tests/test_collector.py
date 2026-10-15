@@ -6,6 +6,7 @@ import pytest
 
 from focuspack.collector import Collector
 from focuspack.config import FocusPackConfig
+from focuspack.graph import FileRole
 
 
 def test_collector_basic(tmp_path: Path):
@@ -107,3 +108,86 @@ def test_collector_nonexistent_focus_target_raises(tmp_path: Path):
     collector = Collector(cfg)
     with pytest.raises(FileNotFoundError, match="does not match any file"):
         collector.collect()
+
+
+def test_collector_external_symlink_protection(tmp_path: Path):
+    # Outside file that should never be leaked
+    outside_dir = tmp_path.parent / "outside_secret_dir"
+    outside_dir.mkdir(exist_ok=True)
+    secret_file = outside_dir / "secret.env"
+    secret_file.write_text("LEAKED_KEY=12345", encoding="utf-8")
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    (repo_dir / "app.py").write_text("print('safe')", encoding="utf-8")
+
+    # Create symlink pointing outside repository
+    symlink_file = repo_dir / "leak_symlink.env"
+    try:
+        symlink_file.symlink_to(secret_file)
+    except (OSError, NotImplementedError):
+        # On Windows if developer mode or privilege is missing for symlinks, skip test
+        return
+
+    collector = Collector(FocusPackConfig(root_path=str(repo_dir)))
+    files = collector.collect()
+    collected_paths = [f.relative_path for f in files]
+
+    assert "app.py" in collected_paths
+    assert "leak_symlink.env" not in collected_paths
+    assert not any("LEAKED_KEY" in f.content for f in files)
+
+
+def test_collector_utf8_multibyte_boundary(tmp_path: Path):
+    # Construct a file where a multi-byte UTF-8 character crosses the 1024-byte boundary
+    # 1023 ascii bytes + '€' (3 bytes: \xe2\x82\xac)
+    content = ("a" * 1023) + "€" + ("b" * 500)
+    test_file = tmp_path / "unicode.py"
+    test_file.write_text(content, encoding="utf-8")
+
+    collector = Collector(FocusPackConfig(root_path=str(tmp_path)))
+    # is_binary_file must not falsely mark it as binary
+    assert not collector.is_binary_file(test_file)
+    files = collector.collect()
+    assert any(f.relative_path == "unicode.py" for f in files)
+
+
+def test_collector_ignore_root_anchors(tmp_path: Path):
+    # Valid packages that should NOT be dropped by root-anchored ignores:
+    # src/pkg/context.py and src/env/settings.py
+    src = tmp_path / "src"
+    (src / "pkg").mkdir(parents=True)
+    (src / "env").mkdir(parents=True)
+
+    context_file = src / "pkg" / "context.py"
+    context_file.write_text("class Context: pass", encoding="utf-8")
+
+    settings_file = src / "env" / "settings.py"
+    settings_file.write_text("DEBUG = True", encoding="utf-8")
+
+    # Root outputs that SHOULD be ignored:
+    root_context = tmp_path / "context.xml"
+    root_context.write_text("<doc></doc>", encoding="utf-8")
+
+    collector = Collector(FocusPackConfig(root_path=str(tmp_path)))
+    files = collector.collect()
+    paths = [f.relative_path for f in files]
+
+    assert "src/pkg/context.py" in paths
+    assert "src/env/settings.py" in paths
+    assert "context.xml" not in paths
+
+
+def test_collector_focus_basename_matching(tmp_path: Path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "main.py").write_text("x = 10", encoding="utf-8")
+
+    # User specifies only "-F main.py" without "src/"
+    cfg = FocusPackConfig(root_path=str(tmp_path), focus_targets=["main.py"])
+    collector = Collector(cfg)
+    files = collector.collect()
+    paths = [f.relative_path for f in files]
+
+    assert "src/main.py" in paths
+    assert files[0].role == FileRole.FOCUS_TARGET

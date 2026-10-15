@@ -135,12 +135,13 @@ class ASTParser:
         class BodyCompressor(ast.NodeTransformer):
             def visit_FunctionDef(self, node):
                 self.generic_visit(node)
-                # Check if body is large (more than min_lines statements)
-                if len(node.body) > 3 or (
-                    hasattr(node, "end_lineno")
-                    and hasattr(node, "lineno")
-                    and (node.end_lineno - node.lineno) > min_lines
-                ):
+                # Size-based compression strictly adhering to min_lines
+                line_count = (
+                    (node.end_lineno - node.lineno)
+                    if (hasattr(node, "end_lineno") and hasattr(node, "lineno"))
+                    else len(node.body)
+                )
+                if line_count > min_lines:
                     doc = ast.get_docstring(node)
                     new_body = []
                     if doc:
@@ -151,11 +152,12 @@ class ASTParser:
 
             def visit_AsyncFunctionDef(self, node):
                 self.generic_visit(node)
-                if len(node.body) > 3 or (
-                    hasattr(node, "end_lineno")
-                    and hasattr(node, "lineno")
-                    and (node.end_lineno - node.lineno) > min_lines
-                ):
+                line_count = (
+                    (node.end_lineno - node.lineno)
+                    if (hasattr(node, "end_lineno") and hasattr(node, "lineno"))
+                    else len(node.body)
+                )
+                if line_count > min_lines:
                     doc = ast.get_docstring(node)
                     new_body = []
                     if doc:
@@ -271,6 +273,10 @@ class ASTParser:
                     res.append("")
                     res.extend(format_function(item, inner_indent))
                     has_body = True
+                elif isinstance(item, ast.ClassDef):
+                    res.append("")
+                    res.extend(format_class(item, inner_indent))
+                    has_body = True
                 elif isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
                     val = f" = {ast.unparse(item.value)}" if item.value else ""
                     res.append(
@@ -280,7 +286,11 @@ class ASTParser:
                 elif isinstance(item, ast.Assign):
                     for target in item.targets:
                         if isinstance(target, ast.Name):
-                            res.append(f"{inner_indent}{target.id} = ...")
+                            if target.id == "__all__" or target.id.isupper():
+                                val = f" = {ast.unparse(item.value)}" if item.value else ""
+                                res.append(f"{inner_indent}{target.id}{val}")
+                            else:
+                                res.append(f"{inner_indent}{target.id} = ...")
                             has_body = True
 
             if not has_body:
@@ -290,6 +300,41 @@ class ASTParser:
         for node in tree.body:
             if isinstance(node, (ast.Import, ast.ImportFrom)):
                 lines.append(ast.unparse(node))
+            elif isinstance(node, ast.If):
+                test_str = ast.unparse(node.test)
+                if "TYPE_CHECKING" in test_str:
+                    lines.append(f"if {test_str}:")
+                    for sub_node in node.body:
+                        if isinstance(sub_node, (ast.Import, ast.ImportFrom)):
+                            lines.append(f"    {ast.unparse(sub_node)}")
+            elif isinstance(node, ast.Try):
+                import_nodes = [
+                    sub for sub in node.body if isinstance(sub, (ast.Import, ast.ImportFrom))
+                ]
+                if import_nodes:
+                    lines.append("try:")
+                    for sub in node.body:
+                        if isinstance(sub, (ast.Import, ast.ImportFrom)):
+                            lines.append(f"    {ast.unparse(sub)}")
+                        else:
+                            lines.append("    ...")
+                    for handler in node.handlers:
+                        exc = f" {ast.unparse(handler.type)}" if handler.type else ""
+                        as_name = f" as {handler.name}" if handler.name else ""
+                        lines.append(f"except{exc}{as_name}:")
+                        handler_imports = [
+                            sub
+                            for sub in handler.body
+                            if isinstance(sub, (ast.Import, ast.ImportFrom))
+                        ]
+                        if handler_imports:
+                            for sub in handler.body:
+                                if isinstance(sub, (ast.Import, ast.ImportFrom)):
+                                    lines.append(f"    {ast.unparse(sub)}")
+                                else:
+                                    lines.append("    ...")
+                        else:
+                            lines.append("    ...")
             elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 lines.append("")
                 lines.extend(format_function(node))
@@ -302,7 +347,11 @@ class ASTParser:
             elif isinstance(node, ast.Assign):
                 for target in node.targets:
                     if isinstance(target, ast.Name):
-                        lines.append(f"{target.id} = ...")
+                        if target.id == "__all__" or target.id.isupper():
+                            val = f" = {ast.unparse(node.value)}" if node.value else ""
+                            lines.append(f"{target.id}{val}")
+                        else:
+                            lines.append(f"{target.id} = ...")
 
         result = "\n".join(lines).strip()
         return result or code
@@ -311,18 +360,48 @@ class ASTParser:
     def extract_js_ts_skeleton(cls, code: str) -> str:
         """Extract TypeScript/JavaScript signatures, interfaces, classes, and exported functions."""
         lines: list[str] = []
+        in_multiline_import = False
+        import_buffer: list[str] = []
+
         for line in code.splitlines():
             stripped = line.strip()
+
+            # Handle multi-line imports
+            if in_multiline_import:
+                import_buffer.append(line)
+                if (
+                    "from " in line
+                    or ";" in line
+                    or stripped.endswith("';")
+                    or stripped.endswith('";')
+                ):
+                    lines.extend(import_buffer)
+                    import_buffer = []
+                    in_multiline_import = False
+                continue
+            elif stripped.startswith("import ") and (
+                "from " not in stripped and not stripped.endswith(";")
+            ):
+                in_multiline_import = True
+                import_buffer = [line]
+                continue
+
             if stripped.startswith(
                 ("import ", "export type ", "export interface ", "interface ", "type ")
             ):
                 lines.append(line)
-            elif re.match(r"^(export\s+)?(abstract\s+)?class\s+\w+", stripped):
+            elif re.match(r"^(export\s+)?(default\s+)?(abstract\s+)?class\s+\w+", stripped):
                 lines.append(line)
-            elif re.match(r"^(export\s+)?(async\s+)?function\s+\w+", stripped):
+            elif re.match(r"^(export\s+)?(default\s+)?(async\s+)?function\s*\w*", stripped):
                 sig = re.sub(r"\{.*$", "{ ... }", line)
                 if not sig.endswith("}"):
                     sig += " { ... }"
+                lines.append(sig)
+            elif re.match(
+                r"^(export\s+)?(const|let|var)\s+\w+\s*=\s*(async\s+)?(\([^)]*\)|[a-zA-Z0-9_$]+)\s*=>",
+                stripped,
+            ):
+                sig = re.sub(r"(=>).*$", r"\1 { ... }", line)
                 lines.append(sig)
             elif re.match(r"^\w+\??\(.*\)\s*:\s*.*", stripped) or re.match(
                 r"^\w+\??\s*:\s*.*", stripped

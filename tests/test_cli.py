@@ -121,3 +121,32 @@ def test_cli_strict_budget_counts_whole_rendered_output(tmp_path: Path):
     )
     assert result.exit_code == 1
     assert "strict-budget violation" in result.output
+
+
+def test_cli_loads_focuspack_json_config(tmp_path: Path):
+    (tmp_path / "app.py").write_text("print('hello')", encoding="utf-8")
+    config_file = tmp_path / ".focuspack.json"
+    config_file.write_text('{"output_format": "markdown", "mode": "skeleton"}', encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["pack", str(tmp_path), "--stdout"])
+    assert result.exit_code == 0
+    # Must format as markdown per the .focuspack.json configuration
+    assert "# Codebase Context" in result.output
+
+
+def test_cli_rejects_budget_zero(tmp_path: Path):
+    (tmp_path / "app.py").write_text("print('hello')", encoding="utf-8")
+    runner = CliRunner()
+    result = runner.invoke(cli, ["pack", str(tmp_path), "--budget", "0"])
+    assert result.exit_code == 1
+    assert "Token budget must be greater than 0" in result.output
+
+
+def test_cli_summary_unredacted_secrets(tmp_path: Path):
+    (tmp_path / "key.py").write_text('KEY = "sk-123456789012345678901234567890"', encoding="utf-8")
+    runner = CliRunner()
+    result = runner.invoke(cli, ["pack", str(tmp_path), "--no-redact-secrets"])
+    assert result.exit_code == 0
+    assert "Secrets Detected (Unredacted)" in result.output
+    assert "Secrets Redacted" not in result.output

@@ -69,3 +69,35 @@ def test_json_formatter():
     assert data["summary"]["total_files"] == 1
     assert data["files"][0]["path"] == "config.json"
     assert data["files"][0]["content"] == '{"key": "value"}'
+
+
+def test_xml_formatter_cdata_escaping():
+    import xml.etree.ElementTree as ET
+
+    # File containing ]]> and attribute characters
+    content = 'def test():\n    raw = "]]>"\n    return raw\n'
+    files = [create_sample_file('app<with&quotes">.py', content, FileRole.FOCUS_TARGET)]
+    stats = Analyzer.compute_stats(files)
+    xml_out = Formatter.format_all(files, stats, "", fmt=OutputFormat.XML)
+
+    # Must parse without syntax errors
+    root = ET.fromstring(xml_out)
+    assert root.tag == "documents"
+    file_elem = root.find(".//file")
+    assert file_elem is not None
+    assert file_elem.attrib["path"] == 'app<with&quotes">.py'
+    doc_content = file_elem.find("document_content")
+    assert doc_content is not None
+    assert "]]>" in doc_content.text
+
+
+def test_markdown_formatter_backtick_fences():
+    # File containing markdown triple backticks inside its content
+    content = '```python\nprint("nested code fence")\n```'
+    files = [create_sample_file("docs.md", content, FileRole.FOCUS_TARGET)]
+    stats = Analyzer.compute_stats(files)
+    md_out = Formatter.format_all(files, stats, "", fmt=OutputFormat.MARKDOWN)
+
+    # The outer fence must use at least 4 backticks (````) so it does not collapse on inner ```
+    assert "````markdown" in md_out
+    assert "````\n" in md_out or md_out.endswith("````")

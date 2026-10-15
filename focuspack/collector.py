@@ -102,7 +102,15 @@ class Collector:
 
         for pat in self._ignore_spec:
             clean_pat = pat.rstrip("/")
-            if pat.endswith("/"):
+            if pat.startswith("/"):
+                root_pat = clean_pat.lstrip("/")
+                if pat.endswith("/"):
+                    if norm_path == f"{root_pat}/" or norm_path.startswith(f"{root_pat}/"):
+                        return True
+                else:
+                    if norm_path == root_pat or Path(norm_path).match(root_pat):
+                        return True
+            elif pat.endswith("/"):
                 if f"/{clean_pat}/" in f"/{norm_path}" or norm_path.startswith(f"{clean_pat}/"):
                     return True
             else:
@@ -124,7 +132,14 @@ class Collector:
                 chunk = f.read(1024)
                 if b"\x00" in chunk:
                     return True
-                chunk.decode("utf-8")
+                try:
+                    chunk.decode("utf-8")
+                except UnicodeDecodeError as e:
+                    # If decode fails at the end boundary of the chunk, check valid prefix
+                    if e.end == len(chunk):
+                        chunk[: e.start].decode("utf-8")
+                    else:
+                        return True
         except Exception:
             return True
         return False
@@ -204,9 +219,9 @@ class Collector:
         collected: list[CollectedFile] = []
         self.findings.clear()
 
-        filter_files = None
+        diff_files: set[str] | None = None
         if git_diff_only:
-            filter_files = self.get_git_modified_files()
+            diff_files = self.get_git_modified_files() or set()
 
         # Step 1: Discover valid files and register nodes in graph
         discovered_paths: list[tuple[str, Path]] = []
@@ -224,10 +239,16 @@ class Collector:
 
             for fname in filenames:
                 file_path = current_dir / fname
-                rel_path = file_path.relative_to(self.root_path).as_posix()
 
-                if filter_files is not None and rel_path not in filter_files:
+                # Prevent symlinks from leaking files outside the repository
+                try:
+                    resolved_file = file_path.resolve()
+                    if not resolved_file.is_relative_to(self.root_path):
+                        continue
+                except (ValueError, RuntimeError, OSError):
                     continue
+
+                rel_path = file_path.relative_to(self.root_path).as_posix()
 
                 if self.is_ignored(rel_path, is_dir=False) or not self.matches_includes(rel_path):
                     continue
@@ -249,8 +270,8 @@ class Collector:
 
         # Step 3: Apply focus resolution
         active_focus = list(self.config.focus_targets)
-        if git_diff_only and filter_files:
-            active_focus.extend(filter_files)
+        if git_diff_only and diff_files is not None:
+            active_focus.extend(diff_files)
 
         if active_focus:
             self.validate_focus_targets(active_focus)
