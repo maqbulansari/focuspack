@@ -36,22 +36,21 @@ Transformer research proves that as context length grows, reasoning accuracy plu
 
 ---
 
-## ⚡ Competitive Comparison
+## ⚡ Architectural Comparison
 
-How `focuspack` compares against flat dumpers and other context tools under constrained budgets:
+How `focuspack` differs from whole-repo flat dumpers:
 
-| Capability | Flat Dumpers (Repomix) | codesurf | ctxeng | 🎯 focuspack |
-| :--- | :---: | :---: | :---: | :---: |
-| **Selection Model** | Flat / Dump All (globs) | Focus Path | Focus Path | **Focus-Driven Graph** (`-F`) |
-| **Dependency Awareness** | ❌ None | Import-edge graph | Query import expansion (None in `--files`) | ✅ **AST Import Graph (BFS)** |
-| **Target Preservation under Budget** | N/A (no budget fitting) | ❌ **Drops target file** at low budgets | ❌ **Truncates mid-line** (0 files at $\le$ 2k) | ✅ **Preserves target; compresses tiered** |
-| **Budget Enforcement** | ❌ Exit code 1 check only | Silent file omission | String slicing | ✅ **5-Stage Adaptive Optimizer** (Full Rendered Count) |
-| **AST Interface Skeletons** | Global `--compress` flag | AST Signatures Only | ❌ None | ✅ **Python AST + JS/TS outline** |
-| **Secret & Credential Handling** | ❌ Destructive (deletes whole files) | ❌ Plaintext leak | ❌ None | ✅ **In-Place Redaction (keeps file intact)** |
-| **Semantic Role Tags** | ❌ `<file path="...">` | ❌ None | ❌ None | ✅ `<file role="focus_target\|dependency_contract">` |
-| **Task / Mission Framing** | ❌ Raw dump | ❌ None | ❌ None | ✅ `--task bugfix\|review\|refactor` |
-| **Execution Latency** | 6.04s (Node) / 1.56s (Py) | 1.32s | 2.70s | ✅ **1.21s (Fastest)** |
-| **Runtime Requirement** | ⚠️ Node.js / NPM (`npx`) | Python | Python | ✅ **Zero-Node Pure Python** (`pip`, `uvx`) |
+| Dimension | Whole-Repo Packers (e.g. Repomix) | 🎯 focuspack |
+| :--- | :--- | :--- |
+| **Primary Goal** | Whole-repository packing for general ingestion | Focused task/file context with interface contracts |
+| **Selection Model** | Flat glob patterns / entire repo dumps | Focus file (`-F`) with AST dependency traversal |
+| **Dependency Context** | Flat inclusion or exclusion of whole files | Imports extracted as AST interface skeletons |
+| **Budget Enforcement** | File truncation or exit threshold checks | 5-stage adaptive tiering on total rendered output |
+| **Secret Sanitization** | Whole-file exclusion (e.g. Secretlint) | In-place secret masking (preserves AST and imports) |
+| **Output Semantic Roles** | Flat file tags | Explicit roles (`focus_target` vs `dependency_contract`) |
+| **Task / Mission Framing** | Generic code dump | Prompt templates (`--task bugfix\|review\|refactor`) |
+| **Ecosystem & Runtime** | Broad multi-language (Tree-sitter), Node.js runtime | Pure Python (`pip`, `uvx`), zero Node.js/C runtime |
+
 
 ---
 
@@ -176,8 +175,8 @@ By default, `focuspack` generates semantic XML structured for Anthropic Claude 3
 
 `focuspack` is engineered from the ground up for strict, zero-trust development environments:
 
-### 1. In-Place Secret & Credential Redaction (Data Loss Prevention)
-Unlike flat dumpers that either leak plaintext credentials or destructively drop entire source files (breaking imports and missing critical logic), `focuspack` automatically scans and performs **in-place redaction** (`[REDACTED_SECRET: ...]`), preserving your code's syntactic structure, function signatures, and imports:
+### 1. In-Place Secret & Credential Redaction
+Rather than dropping entire source files when credentials are detected, `focuspack` automatically scans and performs **in-place redaction** (`[REDACTED_SECRET: ...]`), preserving your code's syntactic structure, function signatures, and imports:
 - **API Keys & Tokens:** OpenAI (`sk-...`), Anthropic (`sk-ant-...`), GitHub tokens (`ghp_...`, `github_pat_...`), Slack tokens.
 - **Cloud Credentials:** AWS Access Keys (`AKIA...`), AWS Secret Keys.
 - **Database Connection Strings:** Complete password redaction across `postgres://`, `mysql://`, `mongodb://`, `redis://`, and `mssql://` URLs (preserving host and port for structural context).

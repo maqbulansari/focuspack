@@ -174,3 +174,52 @@ def test_size_based_method_compression():
     res_long = ASTParser.compress_large_methods_python(long_func, min_lines=15)
     assert "..." in res_long
     assert "x_19" not in res_long
+
+
+def test_python_skeleton_docstring_ending_with_quote():
+    import ast
+
+    code = 'def fn():\n    """Docstring ending with quote \\""""\n    return 42\n'
+    skeleton = ASTParser.extract_python_skeleton(code)
+    # Must be valid parseable Python without SyntaxError
+    tree = ast.parse(skeleton)
+    assert tree is not None
+    assert '"""' in skeleton
+
+
+def test_python_skeleton_positional_only_defaults():
+    import ast
+
+    code = 'def fn(x: int = 10, /, y: str = "hello", *, z: bool = False) -> None:\n    pass\n'
+    skeleton = ASTParser.extract_python_skeleton(code)
+    tree = ast.parse(skeleton)
+    assert tree is not None
+    assert (
+        "x: int = 10, /, y: str = 'hello'" in skeleton
+        or 'x: int = 10, /, y: str = "hello"' in skeleton
+    )
+    assert "z: bool = False" in skeleton
+
+
+def test_python_skeleton_class_attributes_preservation():
+    import ast
+
+    code = """
+class ServiceConfig:
+    timeout = 30
+    debug = False
+    name = "focuspack"
+    tags = ["cli", "ast"]
+
+    class SubConfig:
+        retries = 3
+        enabled = True
+"""
+    skeleton = ASTParser.extract_python_skeleton(code)
+    tree = ast.parse(skeleton)
+    assert tree is not None
+    assert "timeout = 30" in skeleton
+    assert "debug = False" in skeleton
+    assert "'focuspack'" in skeleton or '"focuspack"' in skeleton
+    assert "retries = 3" in skeleton
+    assert "enabled = True" in skeleton

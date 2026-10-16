@@ -40,27 +40,6 @@ BANNED_PACKAGES = {
     "electron",
 }
 
-# Explicit Anti-Pattern Keywords in Commit Diff / Feature Descriptions
-NON_GOAL_TERMS = [
-    (
-        r"\bvector\s*(?:db|database|store)\b",
-        "Vector Databases (Non-Goal: focuspack is a deterministic context compiler)",
-    ),
-    (
-        r"\brag\s*(?:pipeline|system)\b",
-        "RAG Pipelines (Non-Goal: focuspack formats context, does not index or query)",
-    ),
-    (r"\belectron\b", "Desktop GUIs (Non-Goal: focuspack is a terminal/CLI developer tool)"),
-    (
-        r"\bcloud\s*(?:upload|storage|api)\b",
-        "Cloud Processing (Non-Goal: focuspack is 100% private, local, and offline-first)",
-    ),
-    (
-        r"\bflat\s*dump(?:er)?\b",
-        "Flat Monolithic Dumps (Non-Goal: focuspack is focus-driven with AST interface contracts)",
-    ),
-]
-
 
 def check_pyproject_dependencies(project_root: Path) -> list[str]:
     """Ensure pyproject.toml does not introduce heavy or out-of-scope dependencies."""

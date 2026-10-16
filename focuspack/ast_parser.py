@@ -18,32 +18,30 @@ def _format_docstring(doc: str, indent: str = "", is_module: bool = False) -> li
     """
     if not doc:
         return []
-    if "\\" in doc:
-        if is_module:
-            candidate = f'r"""\n{doc}\n"""'
-        else:
-            candidate = f'{indent}r"""{doc}"""'
+
+    # If raw string works and does not end with quote, try it
+    if "\\" in doc and not doc.endswith('"'):
+        candidate = f'r"""\n{doc}\n"""' if is_module else f'{indent}r"""{doc}"""'
         try:
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", category=SyntaxWarning)
                 ast.parse(f"def _():\n    {candidate.strip()}\n")
             return [candidate]
         except Exception:
-            escaped = doc.replace("\\", "\\\\")
-            if '"""' in escaped:
-                escaped = escaped.replace('"""', r"\"\"\"")
-            if is_module:
-                return [f'"""\n{escaped}\n"""']
-            return [f'{indent}"""{escaped}"""']
-    else:
-        if '"""' in doc:
-            escaped = doc.replace('"""', r"\"\"\"")
-            if is_module:
-                return [f'"""\n{escaped}\n"""']
-            return [f'{indent}"""{escaped}"""']
-        if is_module:
-            return [f'"""\n{doc}\n"""']
-        return [f'{indent}"""{doc}"""']
+            pass
+
+    # Normal escaping: escape backslashes, internal triple quotes, and trailing quotes
+    escaped = doc.replace("\\", "\\\\").replace('"""', r"\"\"\"")
+    if escaped.endswith('"'):
+        idx = len(escaped)
+        while idx > 0 and escaped[idx - 1] == '"':
+            idx -= 1
+        trailing_count = len(escaped) - idx
+        escaped = escaped[:idx] + (r"\"" * trailing_count)
+
+    if is_module:
+        return [f'"""\n{escaped}\n"""']
+    return [f'{indent}"""{escaped}"""']
 
 
 class ASTParser:
@@ -190,6 +188,17 @@ class ASTParser:
             lines.extend(_format_docstring(mod_doc, "", is_module=True))
             lines.append("")
 
+        def _should_preserve_value(val_node: ast.expr | None) -> bool:
+            if val_node is None:
+                return False
+            if isinstance(
+                val_node, (ast.Constant, ast.List, ast.Tuple, ast.Dict, ast.Set, ast.Name)
+            ):
+                unp = ast.unparse(val_node)
+                return "\n" not in unp and len(unp) <= 80
+            unp = ast.unparse(val_node)
+            return "\n" not in unp and len(unp) <= 60
+
         def format_arg(arg: ast.arg) -> str:
             res = arg.arg
             if arg.annotation:
@@ -198,18 +207,23 @@ class ASTParser:
 
         def format_arguments(args: ast.arguments) -> str:
             parts = []
+            all_pos = args.posonlyargs + args.args
             posonly_count = len(args.posonlyargs)
-            for a in args.posonlyargs:
-                parts.append(format_arg(a))
+            default_offset = len(all_pos) - len(args.defaults)
+
+            for i, a in enumerate(args.posonlyargs):
+                s = format_arg(a)
+                if i >= default_offset:
+                    s += f" = {ast.unparse(args.defaults[i - default_offset])}"
+                parts.append(s)
+
             if posonly_count > 0:
                 parts.append("/")
 
-            default_offset = len(args.args) - len(args.defaults)
-            for i, a in enumerate(args.args):
+            for i, a in enumerate(args.args, start=posonly_count):
                 s = format_arg(a)
                 if i >= default_offset:
-                    default_idx = i - default_offset
-                    s += f" = {ast.unparse(args.defaults[default_idx])}"
+                    s += f" = {ast.unparse(args.defaults[i - default_offset])}"
                 parts.append(s)
 
             if args.vararg:
@@ -286,9 +300,12 @@ class ASTParser:
                 elif isinstance(item, ast.Assign):
                     for target in item.targets:
                         if isinstance(target, ast.Name):
-                            if target.id == "__all__" or target.id.isupper():
-                                val = f" = {ast.unparse(item.value)}" if item.value else ""
-                                res.append(f"{inner_indent}{target.id}{val}")
+                            if item.value and (
+                                target.id == "__all__"
+                                or target.id.isupper()
+                                or _should_preserve_value(item.value)
+                            ):
+                                res.append(f"{inner_indent}{target.id} = {ast.unparse(item.value)}")
                             else:
                                 res.append(f"{inner_indent}{target.id} = ...")
                             has_body = True
@@ -347,9 +364,12 @@ class ASTParser:
             elif isinstance(node, ast.Assign):
                 for target in node.targets:
                     if isinstance(target, ast.Name):
-                        if target.id == "__all__" or target.id.isupper():
-                            val = f" = {ast.unparse(node.value)}" if node.value else ""
-                            lines.append(f"{target.id}{val}")
+                        if node.value and (
+                            target.id == "__all__"
+                            or target.id.isupper()
+                            or _should_preserve_value(node.value)
+                        ):
+                            lines.append(f"{target.id} = {ast.unparse(node.value)}")
                         else:
                             lines.append(f"{target.id} = ...")
 

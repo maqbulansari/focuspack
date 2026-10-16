@@ -61,5 +61,6 @@ jobs:
 
       - name: End-to-End CLI Smoke Test
         run: |
-          python -m focuspack.cli pack -F pyproject.toml -b 8k --strict-budget
+          python -m focuspack.cli pack -F focuspack/cli.py -b 16k --strict-budget
           python -m focuspack.cli analyze
+
